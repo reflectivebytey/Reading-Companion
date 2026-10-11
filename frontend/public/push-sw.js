@@ -31,6 +31,7 @@ self.addEventListener("push", (event) => {
     badge: "/notification-badge.png",
     tag: data.tag || undefined,
     renotify: Boolean(data.tag),
+    requireInteraction: type === "app_update",
     vibrate: type === "report_status" ? [120, 60, 120] : [80, 40, 80],
     data: { url: targetUrl, type, actions },
     ...(typeof data.image === "string" ? { image: data.image } : {}),

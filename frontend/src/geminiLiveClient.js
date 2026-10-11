@@ -336,6 +336,7 @@ export class GeminiLiveClient {
   retry() {
     if (!this.stopped) return Promise.resolve();
     this.stopped = false;
+    this.paused = false;
     this.terminalNoticeSent = false;
     this.connectionRetries = 0;
     this.lastReconnectAt = 0;

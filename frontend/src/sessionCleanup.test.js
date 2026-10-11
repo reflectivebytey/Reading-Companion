@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runSessionCleanup } from "./sessionCleanup.js";
+import { runSessionCleanup, runSessionTeardown } from "./sessionCleanup.js";
 
 const states = ["standby", "listening", "answering", "muted under 30s", "muted over 30s", "voice unavailable", "reconnecting", "connecting"];
 
@@ -19,3 +19,17 @@ for (const state of states) {
     });
   }
 }
+
+test("unmount teardown continues when resources were already closed by End session", async () => {
+  const completed = [];
+  const failures = [];
+  runSessionTeardown([
+    ["Live", () => { throw new Error("already closed"); }],
+    ["playback", () => Promise.reject(new Error("already closed"))],
+    ["microphone", () => completed.push("microphone")],
+    ["camera", () => completed.push("camera")],
+  ], (label, error) => failures.push([label, error.message]));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(completed, ["microphone", "camera"]);
+  assert.deepEqual(failures, [["Live", "already closed"], ["playback", "already closed"]]);
+});

@@ -105,7 +105,7 @@ export function buildPushPayload({ title, body, url = "/", tag, type = "general"
     type: notificationType,
     image: safeImage === "/" && image !== "/" ? undefined : safeImage,
     actions: safeActions.length ? safeActions : undefined,
-    data: { url: safeUrl },
+    data: { url: safeUrl, actions: safeActions.length ? safeActions : undefined },
   };
   const serialized = JSON.stringify(payload);
   return Buffer.byteLength(serialized, "utf8") <= 3072 ? serialized : null;
