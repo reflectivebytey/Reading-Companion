@@ -110,7 +110,7 @@ function RankingRow({ reader, readers, index, onSelect, paused, reduceMotion, le
         transition={{ duration: paused ? 0 : reduceMotion ? 0.12 : 0.24, delay: paused || reduceMotion ? 0 : Math.min(index * 0.02, 0.18) }}
         aria-label={readerAccessibleLabel(reader)}
       >
-        <span className="arena-row-rank">{notStarted ? `#${reader.rank ?? "–"} this week` : `#${reader.rank}`}{tied ? <span className="arena-tie-mark" aria-label="Tied rank">=</span> : null}</span>
+        <span className="arena-row-rank">{`#${reader.rank ?? "–"}`}{tied ? <span className="arena-tie-mark" aria-label="Tied rank">=</span> : null}</span>
         <ReaderAvatar reader={reader} size="row" />
         <span className="arena-row-main">
           <span className="arena-row-name"><span className="arena-row-name-text">{reader.name}</span>{reader.isYou && <span className="arena-you-tag">YOU</span>}</span>
