@@ -9,27 +9,47 @@ const FILLER = new Set([
   "reader", "user", "prefer", "preferred", "like", "want", "love", "enjoy", "need", "would", "should",
   "please", "remember", "asked", "also", "always", "alway", "very", "really", "much", "more", "when",
   "while", "about", "into", "them", "they", "their", "his", "her", "him", "she", "you", "your", "our",
-  "will", "can", "not", "wants", "likes",
+  "will", "can", "wants", "likes",
 ]);
+
+function normalizeMemoryText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[\u2000-\u206F]/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(?:the|and|that|this|with|for|from|has|have|had|was|were|are|its|reader|user|prefer|preferred|like|want|love|enjoy|need|would|should|please|remember|asked|also|always|alway|very|really|much|more|when|while|about|into|them|they|their|his|her|him|she|you|your|our|will|can|wants|likes|mujhe|mere|mera|mein|samajh|hai|hain|karna|karun|kya|ko|se|me|par|aur|abhi|bhi|jo|woh|yeh|yah|toh|lekin|agar|kuch|sab|jaise|aise|thoda|thode|waise)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function keywords(text) {
   return new Set(
-    String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)
+    normalizeMemoryText(text).split(/\s+/)
       .map((word) => (word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word))
       .filter((word) => word.length > 2 && !FILLER.has(word)),
   );
 }
 
-// True when two memories say the same thing in different words.
-function isSameMemory(a, b) {
+function memorySimilarity(a, b) {
   const first = keywords(a);
   const second = keywords(b);
-  if (!first.size || !second.size) return false;
+  if (!first.size || !second.size) return 0;
   let shared = 0;
   for (const word of first) if (second.has(word)) shared += 1;
-  const smaller = Math.min(first.size, second.size);
   const union = first.size + second.size - shared;
-  return shared / union >= 0.6 || (smaller >= 2 && shared / smaller >= 0.9);
+  const jaccard = union === 0 ? 1 : shared / union;
+  const minimum = Math.min(first.size, second.size);
+  const containment = minimum < 2 ? 0 : shared / minimum;
+  return Math.max(jaccard, containment);
+}
+
+// True when two memories say the same thing in different words.
+function isSameMemory(a, b) {
+  const left = normalizeMemoryText(a);
+  const right = normalizeMemoryText(b);
+  if (!left || !right) return false;
+  if (` ${left} `.includes(` ${right} `) || ` ${right} `.includes(` ${left} `)) return true;
+  return memorySimilarity(left, right) >= 0.75;
 }
 
 // Migrates old plain-string entries into { text, timestamp } objects so
@@ -45,6 +65,7 @@ function normalizeEntry(item) {
 export class CompanionMemory {
   constructor() {
     this.memories = [];
+    this.requestCache = new Map();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -61,28 +82,41 @@ export class CompanionMemory {
     }
   }
 
-  // Returns true when the memory is saved OR an equivalent one already exists.
-  add(text) {
+  _seenRequest(scope, requestId) {
+    if (!requestId) return false;
+    const key = `${scope}:${requestId}`;
+    if (this.requestCache.has(key)) return true;
+    this.requestCache.set(key, true);
+    return false;
+  }
+
+  upsert(text, { requestId, scope = "global" } = {}) {
     const clean = (text || "").replace(/\s+/g, " ").trim();
-    if (!clean) return false;
+    if (!clean) return { saved: false, duplicate: false };
     if (DEVANAGARI_PATTERN.test(clean)) {
       console.warn("[MEMORY] Rejected non-English memory:", clean);
-      return false;
+      return { saved: false, duplicate: false };
     }
+    if (this._seenRequest(scope, requestId)) return { saved: true, duplicate: true };
     if (!Array.isArray(this.memories)) this.memories = [];
     const sameIndex = this.memories.findIndex((m) => m.text === clean || isSameMemory(m.text, clean));
     if (sameIndex !== -1) {
-      // Already saved, maybe worded differently: keep the more detailed wording instead of adding a copy.
-      if (clean.length > this.memories[sameIndex].text.length + 8) {
-        this.memories[sameIndex] = { text: clean, timestamp: this.memories[sameIndex].timestamp };
+      const existing = this.memories[sameIndex];
+      if (clean.length > existing.text.length + 8) {
+        this.memories[sameIndex] = { text: clean, timestamp: existing.timestamp || new Date().toISOString() };
         this._save();
       }
-      return true;
+      return { saved: true, duplicate: true, text: existing.text };
     }
     this.memories.push({ text: clean, timestamp: new Date().toISOString() });
     this.memories = this.memories.slice(-50);
     this._save();
-    return true;
+    return { saved: true, duplicate: false, text: clean };
+  }
+
+  // Returns true when the memory is saved OR an equivalent one already exists.
+  add(text, options = {}) {
+    return this.upsert(text, options).saved;
   }
 
   remove(text) {

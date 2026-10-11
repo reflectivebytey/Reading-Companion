@@ -43,6 +43,15 @@ test("restores the selected snapshot without deleting reports or sync metadata",
   assert.equal(readerSnapshotSignature(snapshot), readerSnapshotSignature(snapshot));
 });
 
+test("cloud memory restore replaces the local snapshot instead of appending another copy", () => {
+  localStorage.setItem("reading_companion_memory", JSON.stringify([{ text: "I prefer quiet evenings." }]));
+  restoreLocalReaderSnapshot({
+    version: 1,
+    data: { reading_companion_memory: JSON.stringify([{ text: "I prefer quiet evenings." }]) },
+  });
+  assert.deepEqual(JSON.parse(localStorage.getItem("reading_companion_memory")), [{ text: "I prefer quiet evenings." }]);
+});
+
 test("an empty new reader snapshot does not trigger a migration prompt", () => {
   assert.equal(hasLocalReaderData({ version: 1, data: {} }), false);
 });

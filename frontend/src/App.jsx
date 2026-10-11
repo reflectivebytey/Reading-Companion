@@ -3106,7 +3106,6 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const classifyAbortRef = useRef(null);
   const pageVerificationAbortRef = useRef(null);
   const lastSpecAtRef = useRef(0);
-  const memorySavedTurnRef = useRef(false);
   const warmTimerRef = useRef(null);
   const askingRef = useRef(false);
   const followTimerRef = useRef(null);
@@ -3998,13 +3997,6 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       }
       pendingPracticeRef.current = null;
     }
-    const explicitPersonalMemory = EXPLICIT_MEMORY_TRIGGER.test(fullText) &&
-      !SAVE_GEM_TRIGGER.test(fullText) && !NON_MEMORY_CONTENT_TRIGGER.test(fullText);
-        if (explicitPersonalMemory && !memorySavedTurnRef.current) {
-      fetch(apiUrl("/api/rephrase-memory"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: fullText }) })
-        .then((r) => r.json()).then(({ fact }) => fact && memoryStore.add(fact)).catch(() => {});
-    }
-    memorySavedTurnRef.current = false;
     lastUserTurnRef.current = fullText;
     userTurnCountRef.current += 1;
   }
@@ -4087,10 +4079,12 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
         const currentUserText = userTurnBufRef.current.trim();
         const explicitPersonalMemory = EXPLICIT_MEMORY_TRIGGER.test(currentUserText) &&
           !SAVE_GEM_TRIGGER.test(currentUserText) && !NON_MEMORY_CONTENT_TRIGGER.test(currentUserText);
-        result = explicitPersonalMemory && typeof fact === "string" && memoryStore.add(fact)
-          ? { status: "saved" }
-          : { status: "not_explicitly_requested", message: "Do not save this. Reader memory is only for personal facts they explicitly asked to remember; quotes, gems, book facts, and vocabulary belong elsewhere." };
-      if (result.status === "saved") memorySavedTurnRef.current = true;
+        if (explicitPersonalMemory && typeof fact === "string") {
+          const memoryResult = memoryStore.upsert(fact, { requestId: `tool-memory:${fc.id || `tool-${Date.now()}`}` });
+          result = memoryResult.duplicate ? { status: "already_saved", message: "This memory is already saved." } : { status: "saved" };
+        } else {
+          result = { status: "not_explicitly_requested", message: "Do not save this. Reader memory is only for personal facts they explicitly asked to remember; quotes, gems, book facts, and vocabulary belong elsewhere." };
+        }
       } else if (fc.name === "log_vocabulary") {
         const { term, meaning, contextMeaning, example, grammar, pronunciation, usageRegister, synonyms, antonyms, hindiMeaning, odiaMeaning, hindiSentence, odiaSentence, sentence } = fc.args || {};
         const currentUserText = userTurnBufRef.current.trim();
