@@ -108,8 +108,8 @@ export const HELP_FEATURE_MANIFEST = [
   {
     name: "reading dock buttons",
     entryId: "session-buttons",
-    files: ["App.jsx"],
-  includes: ["aria-label={asking ? \"Stop asking\" : \"Ask a question\"}", "aria-label={muted ? \"Unmute microphone\" : \"Mute microphone\"}", "aria-pressed={muted}", "aria-label=\"Toggle transcript\"", "aria-label=\"End session\""],
+    files: ["App.jsx", "SessionMuteButton.js"],
+    includes: ["aria-label={asking ? \"Stop asking\" : \"Ask a question\"}", "onToggle={toggleMute}", "\"aria-label\": muted ?", "\"aria-pressed\": muted", "aria-label=\"Toggle transcript\"", "aria-label=\"End session\""],
   },
   {
     name: "snapshot and printed page controls",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionMicGate } from "./sessionMicGate.js";
-import { SessionAudioMute } from "./sessionAudioMute.js";
+import { retrySessionAudio, SessionAudioMute, toggleSessionMuteIntent } from "./sessionAudioMute.js";
 
 function makeController({ startError = null } = {}) {
   const calls = [];
@@ -164,4 +164,81 @@ test("speech after unmute stays in the 700ms pre-roll and flushes when a questio
   gate.accept("live words");
   gate.end();
   assert.deepEqual(sent, ["first words", "next words", "live words", "end"]);
+});
+
+function makeIntent(mute, now = () => Date.now()) {
+  const state = { current: false };
+  const startedAt = { current: null };
+  const unmuteClass = { current: null };
+  const updates = [];
+  const toggle = (warm) => toggleSessionMuteIntent({
+    mutedRef: state,
+    setMuted: (value) => updates.push(value),
+    controller: mute,
+    warm,
+    muteStartedAtRef: startedAt,
+    unmuteClassRef: unmuteClass,
+    now,
+  });
+  return { state, startedAt, unmuteClass, updates, toggle };
+}
+
+test("the actual mute intent handler toggles immediately and re-acquires after 31 seconds", async () => {
+  const { mute, calls, release } = makeController();
+  let now = 1000;
+  const intent = makeIntent(mute, () => now);
+  assert.equal(intent.toggle(() => Promise.resolve()), true);
+  assert.equal(intent.state.current, true);
+  assert.equal(intent.toggle(() => Promise.resolve()), false);
+  assert.equal(intent.state.current, false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(mute.isMuted(), false);
+
+  intent.toggle(() => Promise.resolve());
+  now += 31_000;
+  release();
+  intent.toggle(() => Promise.resolve());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(intent.unmuteClass.current, "cold");
+  assert.ok(calls.includes("capture:stop"));
+  assert.ok(calls.includes("capture:start"));
+  assert.equal(intent.state.current, false);
+});
+
+test("unreachable voice leaves reader intent unmuted and Retry can recover later", async () => {
+  const { mute } = makeController();
+  const intent = makeIntent(mute);
+  let attempts = 0;
+  const warm = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("offline");
+  };
+  intent.toggle(warm);
+  intent.toggle(warm);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(intent.state.current, false);
+  assert.equal(mute.isMuted(), true);
+  assert.equal(await retrySessionAudio({ micMuted: intent.state.current, controller: mute, warm }), true);
+  assert.equal(intent.state.current, false);
+  assert.equal(mute.isMuted(), false);
+});
+
+test("20 rapid taps end unmuted without a stuck in-flight lock", async () => {
+  const { mute } = makeController();
+  const intent = makeIntent(mute);
+  for (let tap = 0; tap < 20; tap += 1) intent.toggle(() => Promise.resolve());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(intent.state.current, false);
+  assert.equal(mute.isMuted(), false);
+  assert.equal(mute.isUnmuting(), false);
+});
+
+test("muted intent blocks Retry and model-facing work", () => {
+  const { mute } = makeController();
+  const intent = makeIntent(mute);
+  let modelCalls = 0;
+  intent.toggle(() => Promise.resolve());
+  assert.equal(retrySessionAudio({ micMuted: intent.state.current, controller: mute, warm: () => { modelCalls += 1; } }), false);
+  mute.runIfUnmuted(() => { modelCalls += 1; });
+  assert.equal(modelCalls, 0);
 });

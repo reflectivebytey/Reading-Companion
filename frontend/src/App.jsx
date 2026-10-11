@@ -56,8 +56,6 @@ import {
     Mail,
     MessageCircleMore,
     MessageSquareText,
-    Mic,
-    MicOff,
     Moon,
     Network,
     Pencil,
@@ -99,7 +97,8 @@ import MascotCharacter from "./components/MascotCharacter.jsx";
 import { describeLiveStatus, friendlyErrorMessage } from "./friendlyErrors.js";
 import { GeminiLiveClient } from "./geminiLiveClient.js";
 import { createOpeningMicFallback, SessionMicGate } from "./sessionMicGate.js";
-import { SessionAudioMute } from "./sessionAudioMute.js";
+import { retrySessionAudio, SessionAudioMute, toggleSessionMuteIntent } from "./sessionAudioMute.js";
+import { SessionMuteButton } from "./SessionMuteButton.js";
 import { runSessionCleanup, runSessionTeardown } from "./sessionCleanup.js";
 import { buildAuthorProfiles, fetchWikipediaAuthor, NO_BIO, normalizeAuthorName } from "./authorProfiles.js";
 import { sessionStatusView } from "./sessionStatus.js";
@@ -3794,14 +3793,25 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   function stopCameraNow() { cameraRef.current?.stop(); cameraRef.current = null; setCameraOn(false); setCameraExpanded(false); }
   function toggleMute() {
     triggerLightTap();
+    toggleSessionMuteIntent({
+      mutedRef,
+      setMuted,
+      controller: sessionAudioMuteRef.current,
+      warm: warmSessionAfterUnmute,
+      muteStartedAtRef,
+      unmuteClassRef,
+    });
+  }
+  function retryVoiceConnection() {
+    setVoiceRetryError("");
     const controller = sessionAudioMuteRef.current;
-    if (!controller) return;
-    if (controller.isUnmuting()) { controller.mute(); return; }
-    if (mutedRef.current) {
-      const mutedFor = muteStartedAtRef.current == null ? 0 : Date.now() - muteStartedAtRef.current;
-      unmuteClassRef.current = mutedFor >= 30_000 ? "cold" : "warm";
-      void controller.unmute({ warm: warmSessionAfterUnmute });
-    } else controller.mute();
+    const retry = retrySessionAudio({ micMuted: mutedRef.current, controller, warm: warmSessionAfterUnmute });
+    if (retry === false && !mutedRef.current) {
+      void warmSessionAfterUnmute().catch((error) => {
+        setVoiceRetryError(friendlyErrorMessage(error, "Voice connection could not be restored. Tap Retry or try unmuting again."));
+        setStatus("Voice unavailable");
+      });
+    }
   }
   const onMuteShortcut = useEffectEvent(() => toggleMute());
   useEffect(() => {
@@ -4447,8 +4457,6 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           questionInFlightRef.current = false;
           if (sessionAudioMuteRef.current) sessionAudioMuteRef.current.mute();
           else {
-            mutedRef.current = true;
-            setMuted(true);
             audioCaptureRef.current?.setMuted(true);
             micGateRef.current?.reset();
             stopCameraNow();
@@ -4606,9 +4614,16 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
       stopAutoListen,
       stopCamera: stopCameraNow,
       onMuted: (nextMuted) => {
-        if (nextMuted && !mutedRef.current) muteStartedAtRef.current = Date.now();
+        const shouldSyncUi = mutedRef.current === nextMuted;
+        if (!shouldSyncUi) {
+          if (nextMuted) {
+            audioCaptureRef.current?.setMuted(true);
+            micGateRef.current?.reset();
+          }
+          if (!nextMuted) setVoiceRetryError("");
+          return;
+        }
         if (!nextMuted) muteStartedAtRef.current = null;
-        mutedRef.current = nextMuted;
         setMuted(nextMuted);
         if (!nextMuted) setVoiceRetryError("");
         if (nextMuted) {
@@ -4743,7 +4758,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
               kind={voiceRetryError ? "error" : liveNotice.kind}
               title={voiceRetryError ? "Voice connection unavailable" : liveNotice.title}
               detail={voiceRetryError || liveNotice.detail}
-              actions={voiceRetryError ? [{ label: "Retry", onClick: toggleMute, primary: true }] : liveNotice.code === "lost" ? [{ label: "End session", onClick: handleEnd, primary: true }] : []}
+              actions={voiceRetryError ? [{ label: "Retry", onClick: retryVoiceConnection, primary: true }] : liveNotice.code === "lost" ? [{ label: "End session", onClick: handleEnd, primary: true }] : []}
             />
           </Motion.div>
         )}
@@ -4806,13 +4821,11 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
 
       <div className="glass-dock">
         {LEGACY_STREAMING ? (
-          <Motion.button className={`hud-btn ${muted ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleMute} aria-pressed={muted} aria-label={muted ? "Unmute microphone" : "Mute microphone"} title={muted ? "Unmute microphone" : "Mute microphone"}>
-            {muted ? <MicOff size={22} /> : <Mic size={22} />}
-          </Motion.button>
+          <SessionMuteButton className={`hud-btn ${muted ? "active" : ""}`} muted={muted} onToggle={toggleMute} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} />
         ) : (
           <>
             <Motion.button className={`hud-btn ${asking ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleAsk} aria-label={asking ? "Stop asking" : "Ask a question"} title={asking ? "Stop asking" : "Ask a question"}><MessageCircleMore size={22} /></Motion.button>
-            <Motion.button className={`hud-btn mic-mute-btn ${muted ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleMute} aria-pressed={muted} aria-label={muted ? "Unmute microphone" : "Mute microphone"} title={muted ? "Unmute microphone" : "Mute microphone"}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</Motion.button>
+            <SessionMuteButton className={`hud-btn mic-mute-btn ${muted ? "active" : ""}`} muted={muted} onToggle={toggleMute} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} />
           </>
         )}
         {LEGACY_STREAMING && <Motion.button className={`hud-btn ${cameraOn ? "active" : ""}`} whileTap={{ scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleCamera} aria-label={cameraOn ? "Close camera" : "Open camera"}>
