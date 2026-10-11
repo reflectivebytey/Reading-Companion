@@ -19,7 +19,19 @@ test("connection failures and legacy voice have explicit labels", () => {
 test("the reading dock has one microphone control and it toggles mute", () => {
   const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
   const dock = app.split('<div className="glass-dock">')[1]?.split('<div className="sess-sidekick">')[0] || "";
-  assert.equal([...dock.matchAll(/onClick=\{toggleMute\} aria-pressed=\{muted\}/g)].length, 2);
+  assert.equal([...dock.matchAll(/<SessionMuteButton\b[^>]*onToggle=\{toggleMute\}/g)].length, 2);
+  const muteComponent = readFileSync(new URL("./SessionMuteButton.js", import.meta.url), "utf8");
+  assert.match(muteComponent, /onClick: onToggle/);
+  assert.match(muteComponent, /"aria-pressed": muted/);
+  assert.doesNotMatch(muteComponent, /\bdisabled\b|pointer-events\s*:\s*none/);
+  const css = readFileSync(new URL("./App.css", import.meta.url), "utf8");
+  const muteRules = css.match(/[^{}]*\.mic-mute-btn[^{}]*\{[^{}]*\}/g) || [];
+  assert.ok(muteRules.length > 0);
+  assert.ok(muteRules.every((rule) => !/pointer-events\s*:\s*none/.test(rule)));
+  assert.match(app, /actions=\{voiceRetryError \? \[\{ label: "Retry", onClick: retryVoiceConnection/);
+  const mutedCallback = app.split("onMuted: (nextMuted) => {")[1]?.split("onStatus: (nextStatus, error) =>")[0] || "";
+  assert.doesNotMatch(mutedCallback, /mutedRef\.current\s*=(?!=)/);
+  assert.match(app, /toggleSessionMuteIntent\(\{/);
   assert.doesNotMatch(dock.match(/onClick=\{toggleAsk\}[^>]*>(.*?)<\/Motion\.button>/s)?.[0] || "", /<Mic(?:Off)?\b/);
   assert.match(dock, /MessageCircleMore size=\{22\}/);
 });

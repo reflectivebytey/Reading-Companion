@@ -108,3 +108,26 @@ export class SessionAudioMute {
     this.unmuting = false;
   }
 }
+
+export function toggleSessionMuteIntent({ mutedRef, setMuted, controller, warm, muteStartedAtRef, unmuteClassRef, now = Date.now }) {
+  const nextMuted = !mutedRef.current;
+  if (nextMuted) {
+    muteStartedAtRef.current = now();
+  } else {
+    const mutedFor = muteStartedAtRef.current == null ? 0 : now() - muteStartedAtRef.current;
+    unmuteClassRef.current = mutedFor >= 30_000 ? "cold" : "warm";
+    muteStartedAtRef.current = null;
+  }
+  mutedRef.current = nextMuted;
+  setMuted(nextMuted);
+  if (nextMuted) controller?.mute();
+  else void controller?.unmute({ warm });
+  return nextMuted;
+}
+
+export function retrySessionAudio({ micMuted, controller, warm }) {
+  if (micMuted || !controller) return false;
+  if (controller.isUnmuting()) return true;
+  if (!controller.isMuted()) return false;
+  return controller.unmute({ warm });
+}

@@ -345,8 +345,9 @@ export const SAVE_MEMORY_DECLARATION = {
   description:
     "Save one durable fact or preference about the READER for future " +
     "sessions. ONLY call this when the reader explicitly asks to remember " +
-    "it. Never store book quotes/gems, vocabulary, chapter facts, or " +
-    "anything inferred from conversation.",
+    "it. Call this at most once per request or user turn, never as a repeat " +
+    "for the same fact. Never store book quotes/gems, vocabulary, chapter " +
+    "facts, or anything inferred from conversation.",
   parameters: {
     type: "OBJECT",
     properties: {
