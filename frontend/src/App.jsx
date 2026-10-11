@@ -100,8 +100,7 @@ import { describeLiveStatus, friendlyErrorMessage } from "./friendlyErrors.js";
 import { GeminiLiveClient } from "./geminiLiveClient.js";
 import { createOpeningMicFallback, SessionMicGate } from "./sessionMicGate.js";
 import { SessionAudioMute } from "./sessionAudioMute.js";
-import { runSessionCleanup } from "./sessionCleanup.js";
-import { requestTextAnswer } from "./sessionTextQuestion.js";
+import { runSessionCleanup, runSessionTeardown } from "./sessionCleanup.js";
 import { buildAuthorProfiles, fetchWikipediaAuthor, NO_BIO, normalizeAuthorName } from "./authorProfiles.js";
 import { sessionStatusView } from "./sessionStatus.js";
 import { summarizeLatencies } from "./sessionLatency.js";
@@ -3041,12 +3040,9 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const snapBusyRef = useRef(false);
   const [asking, setAsking] = useState(false);
   const [handsFree, setHandsFree] = useState(false);
-  const [typedQuestion, setTypedQuestion] = useState("");
-  const [typedQuestionOpen, setTypedQuestionOpen] = useState(false);
   const [voiceRetryError, setVoiceRetryError] = useState("");
   const [pageNumberInput, setPageNumberInput] = useState("");
   const chapterPathRef = useRef(null);
-  const [textBusy, setTextBusy] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [restorePrompt, setRestorePrompt] = useState(false);
   const [pendingShot, setPendingShot] = useState(null);
@@ -3267,19 +3263,25 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     }, 15000);
 
     return () => {
-      clearInterval(sleepInterval);
-      sessionAudioMuteRef.current?.dispose();
+      const muteController = sessionAudioMuteRef.current;
       sessionAudioMuteRef.current = null;
-      clearTimeout(followTimerRef.current);
-      clearTimeout(quietModeTimerRef.current);
-      clearTimeout(activityTimerRef.current);
-      clearInterval(snapTimerRef.current);
-      clearTimeout(warmTimerRef.current);
-      micGateRef.current?.reset();
-      clientRef.current?.close();
-      audioPlaybackRef.current?.close();
-      audioCaptureRef.current?.stop();
-      cameraRef.current?.stop();
+      const liveClient = clientRef.current;
+      const playback = audioPlaybackRef.current;
+      const capture = audioCaptureRef.current;
+      const camera = cameraRef.current;
+      const vad = vadRef.current;
+      vadRef.current = null;
+      runSessionTeardown([
+        ["session timer", () => clearInterval(sleepInterval)],
+        ["mute controller", () => muteController?.dispose()],
+        ["follow-up timers", () => { clearTimeout(followTimerRef.current); clearTimeout(quietModeTimerRef.current); clearTimeout(activityTimerRef.current); clearInterval(snapTimerRef.current); clearTimeout(warmTimerRef.current); }],
+        ["mic gate", () => micGateRef.current?.reset()],
+        ["VAD", () => vad?.destroy?.()],
+        ["Live connection", () => liveClient?.close()],
+        ["playback", () => playback?.close()],
+        ["microphone", () => capture?.stop()],
+        ["camera", () => camera?.stop()],
+      ], (label, error) => console.warn(`[SESSION] ${label} teardown failed`, error));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -3383,9 +3385,42 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     }, 10_000);
   }
 
+  function startAsk() {
+    if (LEGACY_STREAMING || asking || mutedRef.current || muted || restorePrompt || snapBusy) return;
+    if (!audioCaptureRef.current?.stream) {
+      notify("Mic ready nahi hai. Permission allow karke dobara try kijiye.", "error");
+      return;
+    }
+    clearTimeout(warmTimerRef.current);
+    askingRef.current = true;
+    setAsking(true);
+    questionInFlightRef.current = true;
+    markActive();
+    audioPlaybackRef.current?.clear();
+    micGateRef.current?.start();
+    armFollowUp();
+    void ensureConnected().catch(() => {
+      askingRef.current = false;
+      clearTimeout(followTimerRef.current);
+      micGateRef.current?.reset();
+      questionInFlightRef.current = false;
+      setAsking(false);
+    });
+  }
+
+  function stopAsk() {
+    if (LEGACY_STREAMING) return;
+    endAskNow();
+    setStatus("Ready for the next question");
+  }
+
   function toggleAsk() {
     triggerLightTap();
-    setTypedQuestionOpen((open) => !open);
+    if (mutedRef.current || muted) {
+      notify("Unmute the microphone to ask by voice.", "info");
+      return;
+    }
+    if (asking) stopAsk(); else startAsk();
   }
 
   function stopAutoListen() {
@@ -3574,33 +3609,6 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       notify(`Hands-free unavailable: ${error.message}`, "error");
     }
   }
-  async function askByTyping(event) {
-    event.preventDefault();
-    const question = typedQuestion.trim();
-    if (!question || textBusy || restorePrompt) return;
-    setTextBusy(true);
-    markActive();
-    try {
-      const answer = await requestTextAnswer(fetch, apiUrl("/api/reading/ask-text"), {
-          question,
-          context: `${buildLiveContext().slice(-12000)}\n${buildPageStatusNote(pageRef.current, ghostModeRef.current)}`,
-          pageStatus: pageCanBeSentToLive(pageRef.current) ? "verified_book_page" : pageRef.current ? "unverified" : "none",
-          verification: pageRef.current?.verification || null,
-          transcription: pageRef.current?.verification?.text || "",
-          image: pageCanBeSentToLive(pageRef.current) ? pageRef.current.base64 : "",
-      });
-      appendLine("reader", question);
-      appendLine("companion", answer);
-      setTypedQuestion("");
-      setTranscriptOpen(true);
-      notify("Text answer ready in Transcript. Saving and editing items needs the voice session.", "info");
-    } catch (error) {
-      notify(error.message, "error");
-    } finally {
-      setTextBusy(false);
-    }
-  }
-
   function appendLine(speaker, text) {
     const cleanText = String(text || "").trim();
     if (!cleanText) return;
@@ -4794,22 +4802,6 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           </div>
         </div>
       )}
-      {!LEGACY_STREAMING && typedQuestionOpen && (
-        <form className="session-ask" onSubmit={askByTyping} aria-label="Type a question">
-          <div className="session-text-fallback">
-            <input
-              autoFocus
-              type="text"
-              value={typedQuestion}
-              onChange={(event) => setTypedQuestion(event.target.value)}
-              placeholder="Type a question"
-              aria-label="Type a question"
-              disabled={textBusy}
-            />
-            <button type="submit" disabled={textBusy || !typedQuestion.trim()}>{textBusy ? "Sending…" : "Send"}</button>
-          </div>
-        </form>
-      )}
       <input ref={snapFileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { handleSnapshotFile(e.target.files?.[0]); e.target.value = ""; }} />
 
       <div className="glass-dock">
@@ -4819,7 +4811,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           </Motion.button>
         ) : (
           <>
-            <Motion.button className={`hud-btn ${typedQuestionOpen ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleAsk} aria-label={typedQuestionOpen ? "Close typed question" : "Type a question"} title={typedQuestionOpen ? "Close typed question" : "Type a question"}><MessageSquareText size={22} /></Motion.button>
+            <Motion.button className={`hud-btn ${asking ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleAsk} aria-label={asking ? "Stop asking" : "Ask a question"} title={asking ? "Stop asking" : "Ask a question"}><MessageCircleMore size={22} /></Motion.button>
             <Motion.button className={`hud-btn mic-mute-btn ${muted ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleMute} aria-pressed={muted} aria-label={muted ? "Unmute microphone" : "Mute microphone"} title={muted ? "Unmute microphone" : "Mute microphone"}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</Motion.button>
           </>
         )}
@@ -4867,7 +4859,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
                 <div><dt>Standby</dt><dd>Speech is checked for a direct question. A short detected clip may go to the voice classifier; the continuous mic stream is not sent.</dd></div>
                 <div><dt>Listening to you…</dt><dd>While Tap to ask is active, microphone audio goes to Gemini Live. A verified saved page may be sent as reading context.</dd></div>
                 <div><dt>Answering…</dt><dd>Gemini Live is returning the answer audio and transcript to this device.</dd></div>
-                <div><dt>Mic muted</dt><dd>Automatic microphone audio, camera frames, Live messages, and reconnects stop. An explicitly typed question still goes to the text-answer service with eligible saved page context; it never unmutes the mic.</dd></div>
+                <div><dt>Mic muted</dt><dd>Automatic microphone audio, camera frames, Live messages, and reconnects stop. Unmute the microphone to resume voice questions.</dd></div>
                 <div><dt>Reconnecting…</dt><dd>The voice connection is warming or recovering. Speech is buffered briefly so the start of a question can be sent after it is ready.</dd></div>
               </dl>
             </Motion.section>

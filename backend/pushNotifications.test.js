@@ -69,6 +69,7 @@ test("rich notification payload keeps legacy fields and adds safe typed actions 
   assert.equal(payload.url, "/?open=reports&reportId=r-12");
   assert.equal(payload.data.url, payload.url);
   assert.deepEqual(payload.actions, [{ action: "view-report", title: "View report", url: payload.url }]);
+  assert.deepEqual(payload.data.actions, payload.actions);
   assert.equal(payload.image, "https://cdn.example/report.png");
   assert.equal(payload.tag, "report-r-12");
 });

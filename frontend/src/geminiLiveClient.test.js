@@ -173,15 +173,18 @@ test("opening mic fallback retries until the session becomes ready", () => {
   });
 });
 
-test("manual retry remains pending until the Live client is ready", async () => {
+test("manual retry resumes a stopped and paused Live client before connecting", async () => {
   const client = new GeminiLiveClient({ modelName: "test", config: {}, handlers: {} });
   client.stopped = true;
+  client.paused = true;
   client._handleTransportError = async () => {
+    assert.equal(client.paused, false);
     client.ready = true;
     client.retryResolve?.();
   };
   await client.retry();
   assert.equal(client.ready, true);
+  assert.equal(client.stopped, false);
 });
 
 test("paused Live sessions send no automatic audio, text, image, or context", async () => {

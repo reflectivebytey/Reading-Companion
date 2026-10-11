@@ -147,10 +147,10 @@ const BASE_HELP_GUIDE = [
   {
     id: "session-buttons",
     title: "Reading screen buttons",
-    keywords: ["reading buttons", "dock buttons", "session buttons", "mic button", "camera button", "snapshot button", "transcript button", "ghost button", "end session", "tap to ask", "hands-free", "ask by typing"],
+    keywords: ["reading buttons", "dock buttons", "session buttons", "mic button", "camera button", "snapshot button", "transcript button", "ghost button", "end session", "tap to ask", "hands-free", "ask by voice"],
     screen: "library",
     demo: "dock",
-    content: "The bottom dock has one microphone button for **Mute microphone** / **Unmute microphone**. The neighboring message button starts or stops **Tap to ask**; **Ask by typing** remains available above the dock. **Page snapshot**, **Transcript**, **Ghost**, and **End session** are separate controls. **Snap page** and **Next page** share or replace the current photo. **Transcript** shows the conversation and **Re-sync**. **Ghost** toggles Author’s Ghost Mode.",
+    content: "The bottom dock has one microphone button for **Mute microphone** / **Unmute microphone** and a neighboring message button that starts or stops voice **Tap to ask**. **Page snapshot**, **Transcript**, **Ghost**, and **End session** are separate controls. **Snap page** and **Next page** share or replace the current photo. **Transcript** shows the conversation and **Re-sync**. **Ghost** toggles Author’s Ghost Mode.",
   },
   {
     id: "session-mic",
@@ -158,7 +158,7 @@ const BASE_HELP_GUIDE = [
     keywords: ["mic", "microphone", "mute", "unmute", "muted", "voice permission", "hear me", "automatic listening", "auto-listening", "wake word", "wake-up", "companion name"],
     screen: "library",
     demo: "dock",
-    content: "The status line explains the voice state: **Standby** waits for your companion’s name or the **Tap to ask** message button; a short detected clip may be sent to the voice classifier. **Listening to you…** means your question audio is sent to Gemini Live. **Answering…** means Gemini Live is returning speech and a transcript. **Reconnecting…** means the voice connection is warming or recovering, with a short speech buffer. Tap the single microphone button to mute or unmute. While **Mic muted**, automatic microphone audio, page images, Live messages, classifier calls and reconnects stop; typed questions still work because you explicitly send them. After 30 seconds muted, the app releases the mic hardware and Live connection. Tap the **ⓘ** beside the status for the same explanation in-session. Voice also depends on microphone permission, internet access, browser foreground/background behavior and Gemini availability.",
+    content: "The status line explains the voice state: **Standby** waits for your companion’s name; a short detected clip may be sent to the voice classifier. **Listening to you…** means your question audio is sent to Gemini Live. **Answering…** means Gemini Live is returning speech and a transcript. **Reconnecting…** means the voice connection is warming or recovering, with a short speech buffer. Tap the single microphone button to mute or unmute. While **Mic muted**, automatic microphone audio, page images, Live messages, classifier calls and reconnects stop. After 30 seconds muted, the app releases the mic hardware and Live connection. Unmute to resume voice questions. Tap the **ⓘ** beside the status for the same explanation in-session. Voice also depends on microphone permission, internet access, browser foreground/background behavior and Gemini availability.",
   },
   {
     id: "camera-options",
@@ -366,7 +366,7 @@ const BASE_HELP_GUIDE = [
     title: "Troubleshooting reading, mic, camera and connection problems",
     keywords: ["offline", "reconnecting", "getting ready", "mic not working", "camera not working", "permission", "service notice", "retry connection"],
     screen: "report",
-    content: "Voice reading needs internet and mic permission. If the connection fails, use **Ask by typing**; text replies cannot save or edit items. For mic or snapshot trouble, allow permission in device settings and try a new page photo. If a response went off-topic, use **Re-sync** in **Transcript**. If the problem keeps happening, report it from **Profile** → **Report an issue**.",
+    content: "Voice reading needs internet and mic permission. If the connection fails, unmute the microphone or tap **Retry** in the voice notice. For mic or snapshot trouble, allow permission in device settings and try a new page photo. If a response went off-topic, use **Re-sync** in **Transcript**. If the problem keeps happening, report it from **Profile** → **Report an issue**.",
   },
   {
     id: "about",
@@ -480,7 +480,7 @@ const HELP_GUIDE_TAGLINE = "If you want, you can always ask **Help & guide** abo
 
 const SHORT_ANSWERS = {
   "camera-options": "1. **Snap page** or **Page snapshot** sends one still photo. The app checks whether it shows book text; an unreadable photo asks you to retake it.\n2. When verification is unavailable, the companion will not read lines from that photo. Share a clear page and enter its printed number if needed. **Next page** replaces the previous photo. Snapshot mode has no live camera video.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
-  "session-buttons": "1. Use **Snap page**, **Tap to ask** / **Done speaking**, optional **Hands-free**, or **Ask by typing** above the reading dock.\n2. The dock has **Mic**, **Page snapshot**, **Transcript**, **Ghost** and **End session**; Transcript includes **Re-sync**.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
+  "session-buttons": "1. Use the message button for voice **Tap to ask** / **Done speaking**, or turn on optional **Hands-free**.\n2. The dock has **Mic**, **Page snapshot**, **Transcript**, **Ghost** and **End session**; Transcript includes **Re-sync**.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
   "ghost-mode": "1. Turn on **Ghost** in the reading dock to hear ideas through the author’s themes and perspective.\n2. It works best after you have set the author for that book in **Library**.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
   "story-recap": "1. Tap the **Play** icon on a **Library** book tile to open the recap card, then use **Hear the story** beside **Start Reading**.\n2. Story theatre gives you **Pause**, **Captions**, **Mute**, **Replay**, and a final **Padhna shuru karo** button.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
 };

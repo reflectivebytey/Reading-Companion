@@ -109,7 +109,7 @@ export const HELP_FEATURE_MANIFEST = [
     name: "reading dock buttons",
     entryId: "session-buttons",
     files: ["App.jsx"],
-  includes: ["aria-label={typedQuestionOpen ? \"Close typed question\" : \"Type a question\"}", "aria-pressed={muted}", "aria-label=\"Toggle transcript\"", "aria-label=\"End session\""],
+  includes: ["aria-label={asking ? \"Stop asking\" : \"Ask a question\"}", "aria-label={muted ? \"Unmute microphone\" : \"Mute microphone\"}", "aria-pressed={muted}", "aria-label=\"Toggle transcript\"", "aria-label=\"End session\""],
   },
   {
     name: "snapshot and printed page controls",
@@ -121,7 +121,7 @@ export const HELP_FEATURE_MANIFEST = [
     name: "page verification safety flow",
     entryId: "camera-options",
     files: ["App.jsx", "sessionPage.js", "../../backend/server.js"],
-    includes: ["/api/reading/verify-page", "pageStatus: pageCanBeSentToLive", "Retake", "pageCanBeSentToLive"],
+    includes: ["/api/reading/verify-page", "parsePageVerificationResponse", "pageVerificationDecision", "Retake", "pageCanBeSentToLive"],
   },
   {
     name: "ghost mode toggle",
