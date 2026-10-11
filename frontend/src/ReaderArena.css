@@ -208,6 +208,10 @@
 
 /* Reader Arena roster: fixed header, top-anchored podium, inner roster scroll, pinned place card. */
 .arena-screen { padding-bottom: calc(var(--bottom-nav-h,72px) + var(--bottom-nav-shell-extra,13px) + env(safe-area-inset-bottom,0px) + 10px); }
+@media (min-width: 360px) and (max-width: 430px) {
+  .arena-content { padding-top: 26px; }
+  .arena-stage { padding-top: 28px; overflow: visible; }
+}
 .arena-screen::before { animation: arena-nebula-fade .35s ease-out both; }
 .arena-screen::after { animation: none; }
 .arena-avatar-ring { animation: none; }

@@ -76,10 +76,8 @@ export class SessionAudioMute {
     this.onStatus?.("reconnecting");
     try {
       this.live?.resume?.();
-      Promise.resolve(warm?.()).catch((error) => {
-        if (!this.muted && attempt === this.unmuteAttempt) this.onStatus?.("reconnecting", error);
-      });
       if (this.released) await this.capture?.start();
+      await warm?.();
       if (attempt !== this.unmuteAttempt || !this.unmuting) {
         this.capture?.setMuted(true);
         return false;
@@ -89,6 +87,7 @@ export class SessionAudioMute {
       this.released = false;
       this.unmuting = false;
       this.onMuted?.(false);
+      this.onStatus?.("connected");
       return true;
     } catch (error) {
       if (attempt !== this.unmuteAttempt || !this.unmuting) return false;

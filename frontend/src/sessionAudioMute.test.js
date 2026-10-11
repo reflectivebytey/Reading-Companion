@@ -72,6 +72,42 @@ test("a warm-window unmute keeps hardware and warms without reopening capture", 
   assert.ok(calls.includes("warm"));
 });
 
+test("immediate unmute waits for the Live warmup before enabling the microphone", async () => {
+  const { mute, calls } = makeController();
+  let finishWarm;
+  mute.mute();
+  const unmuting = mute.unmute({ warm: () => new Promise((resolve) => { finishWarm = resolve; }) });
+  assert.equal(mute.isMuted(), true);
+  assert.equal(mute.isUnmuting(), true);
+  finishWarm();
+  assert.equal(await unmuting, true);
+  assert.equal(mute.isMuted(), false);
+  assert.ok(calls.includes("capture:live"));
+});
+
+test("unmute after the 30-second release reacquires hardware before Live warmup", async () => {
+  const { mute, calls, release } = makeController();
+  mute.mute();
+  release();
+  const order = [];
+  mute.capture.start = async () => { order.push("capture"); };
+  assert.equal(await mute.unmute({ warm: async () => { order.push("live"); } }), true);
+  assert.deepEqual(order, ["capture", "live"]);
+  assert.ok(calls.includes("capture:live"));
+});
+
+test("failed Live warmup stays muted and a visible retry can recover", async () => {
+  const { mute, calls } = makeController();
+  let attempts = 0;
+  mute.mute();
+  assert.equal(await mute.unmute({ warm: async () => { attempts += 1; throw new Error("offline"); } }), false);
+  assert.equal(mute.isMuted(), true);
+  assert.ok(calls.includes("permission:error"));
+  assert.equal(await mute.unmute({ warm: async () => { attempts += 1; } }), true);
+  assert.equal(attempts, 2);
+  assert.equal(mute.isMuted(), false);
+});
+
 test("microphone permission failure leaves the session muted", async () => {
   const { mute, calls, release } = makeController({ startError: new Error("permission denied") });
   mute.mute();

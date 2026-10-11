@@ -1,5 +1,5 @@
 // Broadcast a push notification to every subscribed device.
-// Usage: npm run push:send -w backend -- --title "Version 2.1.0 is here" --body "Tap to see what's new" [--url /] [--tag release]
+// Usage: npm run push:send -w backend -- --type announcement --title "Reading Companion is live" --body "Open to see what's new" [--image /banner.png] [--data-url /] [--tag release] [--actions '[{"action":"open","title":"Open"}]']
 import dotenv from "dotenv";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,11 +13,27 @@ const { values } = parseArgs({
     title: { type: "string" },
     body: { type: "string", default: "" },
     url: { type: "string", default: "/" },
+    "data-url": { type: "string" },
+    type: { type: "string" },
+    image: { type: "string" },
+    actions: { type: "string" },
     tag: { type: "string" },
   },
 });
 
-const payload = buildPushPayload(values);
+let actions;
+try {
+  actions = values.actions ? JSON.parse(values.actions) : undefined;
+  if (actions !== undefined && !Array.isArray(actions)) throw new Error("actions_must_be_array");
+} catch {
+  console.error("--actions must be a JSON array of {action,title,url?} objects.");
+  process.exit(1);
+}
+const payload = buildPushPayload({
+  ...values,
+  actions,
+  data: values["data-url"] ? { url: values["data-url"] } : undefined,
+});
 if (!payload) {
   console.error('Missing --title. Example: npm run push:send -w backend -- --title "Hello" --body "World"');
   process.exit(1);

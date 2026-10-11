@@ -16,7 +16,7 @@ test("maps report categories to their Storage folders and uses reporter plus tic
     index: 0,
     count: 1,
     extension: "jpg",
-  }), "Bug/Jane_Doe_RC-000042.jpg");
+  }), "unowned/Bug/Jane_Doe_RC-000042.jpg");
   assert.equal(screenshotObjectPath({
     type: "enhance",
     reporter: "Reader",
@@ -24,7 +24,7 @@ test("maps report categories to their Storage folders and uses reporter plus tic
     index: 0,
     count: 1,
     extension: "png",
-  }), "Improvement/Reader_RC-000043.png");
+  }), "unowned/Improvement/Reader_RC-000043.png");
   assert.equal(screenshotObjectPath({
     type: "feature",
     reporter: "Reader",
@@ -32,7 +32,7 @@ test("maps report categories to their Storage folders and uses reporter plus tic
     index: 0,
     count: 1,
     extension: "jpg",
-  }), "New feature/Reader_RC-000044.jpg");
+  }), "unowned/New feature/Reader_RC-000044.jpg");
 });
 
 test("disambiguates multiple screenshot filenames and rejects invalid storage inputs", () => {
@@ -43,7 +43,22 @@ test("disambiguates multiple screenshot filenames and rejects invalid storage in
     index: 1,
     count: 2,
     extension: "jpg",
-  }), "Issue/Reader_RC-000045_2.jpg");
+  }), "unowned/Issue/Reader_RC-000045_2.jpg");
   assert.throws(() => screenshotObjectPath({ type: "unknown", reporter: "A", ticketNumber: 1, index: 0, count: 1, extension: "jpg" }), /invalid_report_type/);
   assert.throws(() => screenshotObjectPath({ type: "bug", reporter: "A", ticketNumber: 1, index: 0, count: 1, extension: "gif" }), /invalid_screenshot_extension/);
+});
+
+test("report screenshots are placed under the authenticated owner prefix", () => {
+  assert.equal(screenshotObjectPath({
+    type: "bug",
+    reporter: "Reader",
+    ticketNumber: 46,
+    index: 0,
+    count: 1,
+    extension: "png",
+    ownerUserId: "123e4567-e89b-42d3-a456-426614174000",
+  }), "123e4567-e89b-42d3-a456-426614174000/Bug/Reader_RC-000046.png");
+  assert.throws(() => screenshotObjectPath({
+    type: "bug", reporter: "Reader", ticketNumber: 46, index: 0, count: 1, extension: "png", ownerUserId: "not-a-user",
+  }), /invalid_report_owner/);
 });

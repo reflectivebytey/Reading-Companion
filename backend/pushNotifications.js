@@ -65,17 +65,50 @@ export function isReminderDue(row, now = new Date(), windowMinutes = REMINDER_WI
   return (minute - target + 1440) % 1440 < windowMinutes;
 }
 
-export function buildPushPayload({ title, body, url = "/", tag } = {}) {
-  const cleanTitle = String(title || "").trim().slice(0, 80);
-  const cleanBody = String(body || "").trim().slice(0, 240);
+function safeNotificationUrl(value, type) {
+  if (typeof value !== "string" || !value) return "/";
+  if (value.startsWith("/") && !value.startsWith("//")) return value.slice(0, 512);
+  if (type === "announcement") {
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol === "https:" && !parsed.username && !parsed.password) return parsed.href.slice(0, 512);
+    } catch { /* invalid URLs fall back to the app */ }
+  }
+  return "/";
+}
+
+export function buildPushPayload({ title, body, url = "/", tag, type = "general", image, actions, data } = {}) {
+  const cleanTitle = String(title || "").trim().slice(0, 50);
+  const cleanBody = String(body || "").trim().slice(0, 120);
   if (!cleanTitle) return null;
-  const safeUrl = typeof url === "string" && url.startsWith("/") && !url.startsWith("//") ? url : "/";
-  return JSON.stringify({
+  const allowedTypes = new Set(["general", "report_status", "app_update", "announcement"]);
+  const notificationType = allowedTypes.has(type) ? type : "general";
+  const safeUrl = safeNotificationUrl(data?.url ?? url, notificationType);
+  const safeImage = typeof image === "string" && image.length <= 512
+    ? safeNotificationUrl(image, "announcement")
+    : "/";
+  const safeActions = Array.isArray(actions) ? actions.slice(0, 2).flatMap((item, index) => {
+    const action = String(item?.action || `action-${index + 1}`).trim().replace(/[^a-z0-9_-]/gi, "").slice(0, 24);
+    const actionTitle = String(item?.title || "").trim().slice(0, 20);
+    if (!action || !actionTitle) return [];
+    return [{
+      action,
+      title: actionTitle,
+      ...(item.url ? { url: safeNotificationUrl(item.url, notificationType) } : {}),
+    }];
+  }) : [];
+  const payload = {
     title: cleanTitle,
     body: cleanBody,
     url: safeUrl,
     tag: typeof tag === "string" && tag ? tag.slice(0, 64) : undefined,
-  });
+    type: notificationType,
+    image: safeImage === "/" && image !== "/" ? undefined : safeImage,
+    actions: safeActions.length ? safeActions : undefined,
+    data: { url: safeUrl },
+  };
+  const serialized = JSON.stringify(payload);
+  return Buffer.byteLength(serialized, "utf8") <= 3072 ? serialized : null;
 }
 
 export function pickReminderMessage(now = new Date()) {

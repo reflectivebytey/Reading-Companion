@@ -28,7 +28,7 @@ export const HELP_RETRIEVAL_CASES = [
   { question: "How does the streak work?", expectedId: "streak" },
   { question: "How do saved quotes work?", expectedId: "gems" },
   { question: "How do I generate an illustration for a gem?", expectedId: "gem-detail" },
-  { question: "How do I choose a gem card template, accent and aspect ratio?", expectedId: "gem-detail" },
+  { question: "How do I choose a gem card color effect?", expectedId: "gem-detail" },
   { question: "What is in Memory?", expectedId: "memory" },
   { question: "Explain the Cognitive Constellation mind map", expectedId: "mind-map" },
   { question: "How do I change my avatar and companion?", expectedId: "profile" },
@@ -109,7 +109,7 @@ export const HELP_FEATURE_MANIFEST = [
     name: "reading dock buttons",
     entryId: "session-buttons",
     files: ["App.jsx"],
-    includes: ["\"Stop asking\" : \"Ask a question\"", "aria-pressed={muted}", "MessageCircleMore size={22}", "aria-label=\"Toggle transcript\"", "aria-label=\"End session\""],
+  includes: ["aria-label={typedQuestionOpen ? \"Close typed question\" : \"Type a question\"}", "aria-pressed={muted}", "aria-label=\"Toggle transcript\"", "aria-label=\"End session\""],
   },
   {
     name: "snapshot and printed page controls",
@@ -222,8 +222,8 @@ export const HELP_FEATURE_MANIFEST = [
   {
     name: "gem card studio and chat diagram",
     entryId: "gem-detail",
-    files: ["GemStoryCard.jsx", "gemTemplates/index.js", "gemTemplates/aspect.js", "gemTemplates/templates.test.js", "helpAnimations.js", "HelpAnimations.jsx"],
-     includes: ["Choose gem card template", "Surprise me", "gsc-palette-row", "Show artwork", "aspect = \"9:16\"", "width:1080px;height:${dimensions.height}px", "id: \"gem-download\"", "Choose a template", "kind: \"flow\""],
+    files: ["GemStoryCard.jsx", "GemStoryCard.css", "helpAnimations.js", "HelpAnimations.jsx"],
+    includes: ["Choose color effect", "Noir", "Aurora", "Vintage", "Neon", "id: \"gem-download\"", "Choose a color effect", "kind: \"flow\""],
   },
   {
     name: "updates and release notes screen",

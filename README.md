@@ -1,6 +1,13 @@
 # Reading Companion
 
-A personal reading companion app built with React + Vite on the frontend and a small Node/Express backend for AI session orchestration. Version 2.5.0, **Every Line, Reimagined**, includes Gem Studio alongside Reader Arena, Profile, Help and update-delivery improvements while keeping reader data local-first with optional private per-account cloud snapshots.
+A personal reading companion app built with React + Vite on the frontend and a small Node/Express backend for AI session orchestration. Version 2.6.0, **Steady Pages**, improves session recovery, private reports, Reader Arena, author details, notifications and the original gem card while keeping reader data local-first with optional private per-account cloud snapshots.
+
+## Version 2.6.0: Steady Pages
+
+- Session ending and microphone recovery are more reliable, with typed questions available without voice.
+- Your reports are owner-filtered; Arena shows every reader, including zero-time readers.
+- Author profiles, themed pickers, original gem color effects, and rich push notifications are refreshed.
+- Apply the report privacy and Arena roster migrations before deploying the frontend.
 
 ## Version 2.5.0: Every Line, Reimagined
 

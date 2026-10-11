@@ -20,6 +20,7 @@ import { useBackLayer } from "./backStack.js";
 import MajorReleaseCard from "./MajorRelease.jsx";
 import CatalogCard from "./CatalogCard.jsx";
 import ReaderArenaReleaseCard from "./ReaderArenaReleaseCard.jsx";
+import SteadyPagesReleaseCard from "./SteadyPagesReleaseCard.jsx";
 import { INTERACTION_SPRING } from "./motionConfig.js";
 import { useGeminiVoiceDriver } from "./onboarding/avatarDriver.js";
 import { applyPushPrefs, collectSessionStarts, currentPushEndpoint, computeStudyPattern, formatClockMinute, loadPushPrefs, notificationPermission, pushErrorMessage } from "./pushNotifications.js";
@@ -29,6 +30,9 @@ import "./SettingsScreens.css";
 import { useHaptic } from "./useHaptic.js";
 import { APP_VERSION } from "./version.js";
 import { fetchArenaPhotoPreference, setArenaPhotoVisibility } from "./readingQuota.js";
+import { supabaseClient } from "./supabaseClient.js";
+import { reportsForOwner } from "./reportOwnership.js";
+import ThemedPicker from "./ThemedPicker.jsx";
 
 export { APP_VERSION };
 const VOICES = ["Leda", "Aoede", "Kore", "Despina", "Erinome", "Sulafat", "Achernar", "Charon", "Orus"];
@@ -85,7 +89,7 @@ function ReleaseNotesScreen({ releases, onBack, highlightVersion = null }) {
                 transition={{ delay: Math.min(releaseIndex * 0.07, 0.35), duration: 0.28, ease: "easeOut" }}
               >
                 <span className="st-release-node" aria-hidden="true" />
-                {release.arena ? <ReaderArenaReleaseCard release={release} /> : release.catalog ? <CatalogCard release={release} /> : release.major || release.ui || release.pulse ? <MajorReleaseCard release={release} variant={release.pulse ? "pulse" : release.ui ? "ui" : "major"} /> : (
+                {release.steadyPages ? <SteadyPagesReleaseCard release={release} /> : release.arena ? <ReaderArenaReleaseCard release={release} /> : release.catalog ? <CatalogCard release={release} /> : release.major || release.ui || release.pulse ? <MajorReleaseCard release={release} variant={release.pulse ? "pulse" : release.ui ? "ui" : "major"} /> : (
                 <div className="st-release elevated">
                   <div className="st-release-head">
                     <div>
@@ -647,6 +651,12 @@ const REPORT_KEY = "rc_reports";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+async function reportAuthHeaders() {
+  const { data } = await supabaseClient?.auth?.getSession?.() || {};
+  const token = data?.session?.access_token;
+  return { apikey: SUPABASE_KEY, Authorization: `Bearer ${token || SUPABASE_KEY}` };
+}
+
 async function signReportScreenshots(report) {
   const screenshots = Array.isArray(report.screenshots) ? report.screenshots : [];
   const paths = screenshots.filter((screenshot) => typeof screenshot === "string" && !/^(?:data:image\/|https?:\/\/)/i.test(screenshot));
@@ -655,7 +665,7 @@ async function signReportScreenshots(report) {
   try {
     const response = await apiFetch("/api/bug-reports/screenshot-urls", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await reportAuthHeaders()) },
       body: JSON.stringify({ reportId: report.id, paths }),
     });
     if (!response.ok) return { ...report, screenshotUrls: screenshots.filter((screenshot) => /^(?:data:image\/|https?:\/\/)/i.test(screenshot)) };
@@ -678,7 +688,7 @@ async function deliver(report) {
     try {
       const response = await apiFetch("/api/bug-reports", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await reportAuthHeaders()) },
         body: JSON.stringify({ report: { ...report, pushEndpoint: await currentPushEndpoint() } }),
       });
       if (!response.ok) return null;
@@ -697,33 +707,30 @@ async function deliver(report) {
   };
 }
 
-async function fetchReportFromSupabase(reportId) {
-  if (!SUPABASE_URL || !SUPABASE_KEY || !reportId) return null;
+async function fetchReportFromSupabase(reportId, userId) {
+  if (!SUPABASE_URL || !SUPABASE_KEY || !reportId || !userId) return null;
   const url = new URL(`${SUPABASE_URL}/rest/v1/bug_reports`);
   url.searchParams.set("select", "*");
   url.searchParams.set("id", `eq.${reportId}`);
+  url.searchParams.set("owner_user_id", `eq.${userId}`);
   url.searchParams.set("limit", "1");
-  const res = await fetch(url.toString(), { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+  const res = await fetch(url.toString(), { headers: await reportAuthHeaders() });
   if (!res.ok) throw new Error(`report_fetch_failed_${res.status}`);
   const rows = await res.json();
   return Array.isArray(rows) && rows[0] ? signReportScreenshots(rows[0]) : null;
 }
 
 // Only reports this device submitted are synced; matching by reporter name would pull in other people's reports.
-async function syncReportsFromSupabase() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
-  const ownedIds = loadReports().map((item) => item.id).filter((id) => /^r-\d+$/.test(id || ""));
-  if (!ownedIds.length) return [];
+async function syncReportsFromSupabase(userId) {
+  if (!SUPABASE_URL || !SUPABASE_KEY || !userId) return [];
   try {
     const url = new URL(`${SUPABASE_URL}/rest/v1/bug_reports`);
     url.searchParams.set("select", "*");
     url.searchParams.set("order", "created_at.desc");
-    url.searchParams.set("id", `in.(${ownedIds.join(",")})`);
+    url.searchParams.set("owner_user_id", `eq.${userId}`);
+    url.searchParams.set("limit", "1000");
     const res = await fetch(url.toString(), {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-      },
+      headers: await reportAuthHeaders(),
     });
     if (!res.ok) return [];
     const rows = await res.json();
@@ -815,24 +822,30 @@ export function ReportScreen({ nav, stores }) {
     try { return sessionStorage.getItem("rc-open-reports") === "1" ? "reports" : "compose"; } catch { return "compose"; }
   });
   const [reportFilter, setReportFilter] = useState("all");
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(() => {
+    try { return sessionStorage.getItem("rc-open-report-id") || null; } catch { return null; }
+  });
   const [releaseView, setReleaseView] = useState(null);
   const [list, setList] = useState(loadReports);
   const [msg, setMsg] = useState("");
   const [refreshingReports, setRefreshingReports] = useState(false);
   const [refreshingOne, setRefreshingOne] = useState(false);
+  const [reportSyncLoaded, setReportSyncLoaded] = useState(false);
+  const initialNotificationReportRef = useRef(selectedId);
   const [rewrite, setRewrite] = useState(null);
   const rewriteRequestRef = useRef(0);
   const fileRef = useRef(null);
   const isFault = type === "bug" || type === "issue";
 
-  const filteredReports = list.filter((item) => reportFilter === "all" || item.type === reportFilter);
+  const ownedReports = reportsForOwner(list, nav.userId);
+  const filteredReports = ownedReports.filter((item) => reportFilter === "all" || item.type === reportFilter);
   const selectedReport = filteredReports.find((item) => item.id === selectedId) || null;
 
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 2800); };
 
   useEffect(() => {
     try { sessionStorage.removeItem("rc-open-reports"); } catch { /* storage unavailable */ }
+    try { sessionStorage.removeItem("rc-open-report-id"); } catch { /* storage unavailable */ }
   }, []);
 
   useBackLayer(view === "reports" && Boolean(selectedId), () => setSelectedId(null));
@@ -855,6 +868,7 @@ export function ReportScreen({ nav, stores }) {
   function persist(next) {
     const prepared = next.map((r) => ({
       ...r,
+      ownerUserId: r.ownerUserId || r.owner_user_id || null,
       status: normalizeReportStatus(r),
       resolvedAt: r.resolvedAt || r.resolved_at || null,
       resolvedInVersion: r.resolvedInVersion || r.resolved_in_version || null,
@@ -869,7 +883,7 @@ export function ReportScreen({ nav, stores }) {
     if (!SUPABASE_URL || !SUPABASE_KEY || refreshingReports) return;
     setRefreshingReports(true);
     try {
-      const remote = await syncReportsFromSupabase();
+      const remote = await syncReportsFromSupabase(nav.userId);
       if (remote.length) {
         const local = loadReports();
         const merged = [...remote, ...local.filter((item) => !remote.some((row) => row.id === item.id))];
@@ -888,7 +902,7 @@ export function ReportScreen({ nav, stores }) {
     setRefreshingOne(true);
     try {
       // keep the spinner visible long enough to notice
-      const [row] = await Promise.all([fetchReportFromSupabase(reportId), new Promise((resolve) => setTimeout(resolve, 600))]);
+      const [row] = await Promise.all([fetchReportFromSupabase(reportId, nav.userId), new Promise((resolve) => setTimeout(resolve, 600))]);
       if (row) {
         const local = loadReports();
         const exists = local.some((item) => item.id === reportId);
@@ -907,22 +921,33 @@ export function ReportScreen({ nav, stores }) {
   useEffect(() => {
     let active = true;
     async function sync() {
-      if (!SUPABASE_URL || !SUPABASE_KEY) return;
-      const remote = await syncReportsFromSupabase();
-      if (!active || !remote.length) return;
-      const local = loadReports();
-      const merged = [...remote, ...local.filter((item) => !remote.some((row) => row.id === item.id))];
-      persist(merged.slice(0, 25));
+      if (!SUPABASE_URL || !SUPABASE_KEY || !nav.userId) {
+        setReportSyncLoaded(true);
+        return;
+      }
+      try {
+        const remote = await syncReportsFromSupabase(nav.userId);
+        if (!active) return;
+        const local = loadReports();
+        const merged = [...remote, ...local.filter((item) => !remote.some((row) => row.id === item.id))];
+        persist(merged.slice(0, 25));
+      } finally {
+        if (active) setReportSyncLoaded(true);
+      }
     }
     sync();
     return () => { active = false; };
-  }, [stores.profile.data.name]);
+  }, [stores.profile.data.name, nav.userId]);
 
   useEffect(() => {
     if (selectedId && !filteredReports.some((item) => item.id === selectedId)) {
+      if (initialNotificationReportRef.current === selectedId && !reportSyncLoaded) return;
+      initialNotificationReportRef.current = null;
       setSelectedId(null);
+    } else if (selectedId) {
+      initialNotificationReportRef.current = null;
     }
-  }, [filteredReports, selectedId]);
+  }, [filteredReports, selectedId, reportSyncLoaded]);
 
   async function flush(current) {
     let changed = false;
@@ -983,6 +1008,7 @@ export function ReportScreen({ nav, stores }) {
     if (title.trim().length < 3 || desc.trim().length < 10) return flash("Add a short title and a few details first");
     const r = {
       id: `r-${Date.now()}`, type, area, severity: isFault ? sev : null,
+      ownerUserId: nav.userId || null,
       title: title.trim(), description: desc.trim(), steps: isFault ? steps.trim() : "",
       screenshots: shots, status: "queued", createdAt: new Date().toISOString(),
       reporter: stores.profile.data.name, appVersion: APP_VERSION,
@@ -1025,9 +1051,7 @@ export function ReportScreen({ nav, stores }) {
           <Group title="What is it about?">
             <label className="rp-dropdown-label">
               <span>Category</span>
-              <select className="rp-type-select" value={type} onChange={(e) => setType(e.target.value)}>
-                {TYPES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-              </select>
+              <ThemedPicker label="Category" value={type} options={TYPES.map(({ id, label }) => ({ value: id, label }))} onChange={setType} className="rp-type-select" />
             </label>
             <div className="rp-type-summary">
               <span className="rp-type-badge">{TYPES.find((entry) => entry.id === type)?.label}</span>
@@ -1038,7 +1062,7 @@ export function ReportScreen({ nav, stores }) {
           <Group title="Details">
             <div className="st-form elevated" onFocusCapture={keepFieldVisible}>
               <label>Where did it happen?
-                <select className="st-input full" value={area} onChange={(e) => setArea(e.target.value)}>{AREAS.map((a) => <option key={a}>{a}</option>)}</select>
+                <ThemedPicker label="Where did it happen?" value={area} options={AREAS.map((option) => ({ value: option, label: option }))} onChange={setArea} className="st-input full" />
               </label>
               {isFault && (
                 <div>
@@ -1114,10 +1138,7 @@ export function ReportScreen({ nav, stores }) {
             <>
               <div className="rp-filter-row">
                 <label className="rp-filter-label">Filter</label>
-                <select className="rp-filter" value={reportFilter} onChange={(e) => setReportFilter(e.target.value)}>
-                  <option value="all">All</option>
-                  {TYPES.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
-                </select>
+                <ThemedPicker label="Filter reports" value={reportFilter} options={[{ value: "all", label: "All" }, ...TYPES.map((entry) => ({ value: entry.id, label: entry.label }))]} onChange={setReportFilter} className="rp-filter" />
                 {SUPABASE_URL && SUPABASE_KEY && (
                   <button className="rp-refresh" type="button" onClick={refreshReports} disabled={refreshingReports} aria-label="Refresh report statuses" title="Refresh report statuses">
                     <RefreshCw size={15} className={refreshingReports ? "spinning" : ""} />

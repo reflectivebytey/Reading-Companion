@@ -1,6 +1,23 @@
 {
   "releases": [
     {
+      "version": "2.6.0",
+      "steadyPages": true,
+      "date": "2026-10-11",
+      "title": "Steady Pages",
+      "subtitle": "A steadier way to read, ask, save, and stay in the loop.",
+      "items": [
+        { "type": "fix", "text": "End calls work across voice states." },
+        { "type": "improve", "text": "Unmute retries voice with feedback." },
+        { "type": "fix", "text": "Reports and screenshots stay private." },
+        { "type": "improve", "text": "Arena crowns show fully; every reader gets a fair rank." },
+        { "type": "improve", "text": "Each co-author gets a portrait, bio, and edit controls." },
+        { "type": "improve", "text": "Dark-themed bottom sheets replace native dropdown menus." },
+        { "type": "improve", "text": "Bring back the original quote card and color effects." },
+        { "type": "feature", "text": "Rich notifications open reports, updates, and announcements." }
+      ]
+    },
+    {
       "version": "2.5.0",
       "arena": true,
       "gemStudio": true,
