@@ -10,8 +10,8 @@ test("theme question maps to the appearance animation", () => {
   assert.equal(pickAnimationsByKeywords("how to change the color theme")[0], "set-appearance");
 });
 
-test("gem studio, Profile UID and deployment update questions map to animated guides", () => {
-  assert.equal(pickAnimationsByKeywords("How do I choose a gem card template and square aspect ratio?")[0], "gem-download");
+test("gem color effects, Profile UID and deployment update questions map to animated guides", () => {
+  assert.equal(pickAnimationsByKeywords("How do I choose a gem card color effect?")[0], "gem-download");
   assert.equal(pickAnimationsByKeywords("Where do I copy my Profile UID?")[0], "prof-card");
   assert.equal(pickAnimationsByKeywords("Do update subscribers get a deployment notification?")[0], "set-app");
 });

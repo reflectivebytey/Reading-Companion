@@ -87,16 +87,22 @@ jobs:
           const changes = (release?.items || [])
             .slice(0, 3)
             .map((item) => item.text)
-            .join('; ');
+            .join(' · ');
 
-          const body =
-            [release?.title, changes].filter(Boolean).join(': ').slice(0, 240) ||
-            'Open the app to get the latest update.';
+          const body = changes.slice(0, 120) || 'Open the app to get the latest update.';
+          const updateUrl = '/?open=update';
 
           const payload = {
-            title: `Reading Companion v${pkg.version} is live`,
+            type: 'app_update',
+            title: `Reading Companion ${pkg.version} is live`,
             body,
-            url: '/',
+            image: `/release-${pkg.version}-banner.png`,
+            actions: [
+              { action: 'update', title: 'Update now', url: updateUrl },
+              { action: 'later', title: 'Later' },
+            ],
+            data: { url: updateUrl },
+            url: updateUrl,
             tag: `release-${pkg.version}`,
           };
 

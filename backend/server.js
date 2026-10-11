@@ -198,7 +198,8 @@ function validReportScreenshotPath(reportId, path) {
   if (typeof path !== "string") return false;
   const legacyPath = new RegExp(`^${reportId}/[1-${MAX_REPORT_SCREENSHOTS}]\\.(?:jpg|png)$`);
   const categorizedPath = /^(?:Bug|Issue|Improvement|New feature)\/[\p{L}\p{N}_-]+_RC-\d{6,}(?:_[1-4])?\.(?:jpg|png)$/u;
-  return legacyPath.test(path) || categorizedPath.test(path);
+  const ownedPath = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|unowned)\/(?:Bug|Issue|Improvement|New feature)\/[\p{L}\p{N}_-]+_RC-\d{6,}(?:_[1-4])?\.(?:jpg|png)$/iu;
+  return legacyPath.test(path) || categorizedPath.test(path) || ownedPath.test(path);
 }
 
 app.get("/api/health", (req, res) => {
@@ -425,7 +426,7 @@ ${excerpt || "No guide entry matched."}${animationNote}`,
 async function findBugReport(reportId) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/bug_reports`);
   url.searchParams.set("id", `eq.${reportId}`);
-  url.searchParams.set("select", "id,ticket_number,screenshots");
+  url.searchParams.set("select", "id,ticket_number,screenshots,owner_user_id");
   const response = await fetch(url.toString(), { headers: storageHeaders() });
   if (!response.ok) throw new Error(`bug_report_lookup_failed_${response.status}`);
   const rows = await response.json();
@@ -487,6 +488,10 @@ app.post("/api/bug-reports", limitReportScreenshotUploads, async (req, res) => {
     return res.status(503).json({ error: "supabase_storage_not_configured" });
   }
   const report = req.body?.report;
+  const ownerUserId = await readSupabaseUserId(req);
+  if (report?.ownerUserId && report.ownerUserId !== ownerUserId) {
+    return res.status(401).json({ error: "authentication_required" });
+  }
   const screenshots = Array.isArray(report?.screenshots) ? report.screenshots : [];
   if (!/^r-\d+$/.test(report?.id || "") || !REPORT_TYPES.has(report?.type)
     || String(report?.title || "").trim().length < 3
@@ -500,6 +505,9 @@ app.post("/api/bug-reports", limitReportScreenshotUploads, async (req, res) => {
   try {
     const existingReport = await findBugReport(report.id);
     if (existingReport) {
+      if (!ownerUserId || existingReport.owner_user_id !== ownerUserId) {
+        return res.status(409).json({ error: "report_id_conflict" });
+      }
       return res.json({
         id: existingReport.id,
         ticketNumber: existingReport.ticket_number,
@@ -533,6 +541,7 @@ app.post("/api/bug-reports", limitReportScreenshotUploads, async (req, res) => {
         index,
         count: decoded.length,
         extension: image.extension,
+        ownerUserId,
       });
       const response = await fetch(storageObjectUrl(path), {
         method: "POST",
@@ -557,6 +566,7 @@ app.post("/api/bug-reports", limitReportScreenshotUploads, async (req, res) => {
       description: String(report.description).trim(),
       steps: report.steps || "",
       screenshots: createdPaths,
+      owner_user_id: ownerUserId,
       reporter: String(report.reporter || "Reader").trim().slice(0, 80),
       push_endpoint: typeof report.pushEndpoint === "string" && report.pushEndpoint.length <= 1024 && report.pushEndpoint.startsWith("https://") ? report.pushEndpoint : null,
       app_version: report.appVersion || null,
@@ -602,6 +612,8 @@ app.post("/api/bug-reports/screenshot-urls", async (req, res) => {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return res.status(503).json({ error: "supabase_storage_not_configured" });
   }
+  const ownerUserId = await readSupabaseUserId(req);
+  if (!ownerUserId) return res.status(401).json({ error: "authentication_required" });
   const { reportId, paths } = req.body || {};
   if (!/^r-\d+$/.test(reportId || "") || !Array.isArray(paths) || paths.length > MAX_REPORT_SCREENSHOTS
     || paths.some((path) => !validReportScreenshotPath(reportId, path))) {
@@ -611,7 +623,7 @@ app.post("/api/bug-reports/screenshot-urls", async (req, res) => {
   try {
     const report = await findBugReport(reportId);
     const storedPaths = new Set(Array.isArray(report?.screenshots) ? report.screenshots : []);
-    if (!report || paths.some((path) => !storedPaths.has(path))) {
+    if (!report || report.owner_user_id !== ownerUserId || paths.some((path) => !storedPaths.has(path))) {
       return res.status(404).json({ error: "report_screenshot_not_found" });
     }
     const signedScreenshots = await Promise.all(paths.map(async (path) => {
@@ -1638,8 +1650,8 @@ app.post("/api/push/send", async (req, res) => {
 });
 
 const REPORT_STATUS_LABELS = {
-  seen: "Seen", review: "Under review", rejected: "Rejected", approved: "Approved",
-  in_progress: "Work in progress", testing: "Testing", done: "Completed",
+  seen: "Seen", review: "In review", rejected: "Rejected", approved: "Approved",
+  in_progress: "In progress", testing: "Testing", done: "Done",
 };
 
 // Supabase Database Webhook (bug_reports UPDATE) -> push to the reporter's device.
@@ -1651,15 +1663,21 @@ app.post("/api/push/report-status", async (req, res) => {
   if (!record || !record.push_endpoint) return res.json({ skipped: "no_endpoint" });
   const norm = (s) => String(s ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   const status = norm(record.status);
-  if (previous && norm(previous.status) === status) return res.json({ skipped: "status_unchanged" });
+  if (previous && norm(previous.status) === status && String(previous.status_note || "") === String(record.status_note || "")) {
+    return res.json({ skipped: "status_unchanged" });
+  }
   const label = REPORT_STATUS_LABELS[status];
   if (!label) return res.json({ skipped: "status_not_notifiable" });
-  const version = status === "done" && record.resolved_in_version ? ` in v${record.resolved_in_version}` : "";
+  const ticket = String(record.ticket_number || "").replace(/\D/g, "").slice(-6).padStart(6, "0");
+  const reportUrl = `/?open=reports&reportId=${encodeURIComponent(String(record.id || ""))}`;
   const payload = buildPushPayload({
-    title: "Your report was updated",
-    body: `${record.ticket_number ? "Report #" + record.ticket_number : "Your report"} is now ${label}${version}`,
-    url: "/?open=reports",
+    type: "report_status",
+    title: `${ticket ? `Report #${ticket}` : "Your report"} is now ${label}`,
+    body: String(record.status_note || "Status updated. Open your report for details."),
+    url: reportUrl,
+    data: { url: reportUrl },
     tag: `report-${record.id}`,
+    actions: [{ action: "view-report", title: "View report", url: reportUrl }],
   });
   if (!payload) return res.json({ skipped: "invalid_payload" });
   try {

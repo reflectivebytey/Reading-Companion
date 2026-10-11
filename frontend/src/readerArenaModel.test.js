@@ -69,17 +69,18 @@ test("reduced motion removes rise, count-up, and idle effects", () => {
   assert.equal(getArenaMotionSettings(false).rise, true);
 });
 
-test("weekly roster shows raced readers first and zero-time readers in all-time order", () => {
+test("weekly roster shows raced readers first and zero-time readers with tied weekly ranks", () => {
   const data = buildWeeklyArenaData([
     { rank: 2, weeklyRank: 2, weeklySeconds: 60, allTimeRank: 1, name: "Asha" },
     { rank: 1, weeklyRank: 1, weeklySeconds: 120, allTimeRank: 3, name: "Noor" },
-    { rank: null, weeklyRank: null, weeklySeconds: 0, allTimeRank: 2, name: "Ravi" },
+    { rank: 3, weeklyRank: 3, weeklySeconds: 0, allTimeRank: 2, name: "Ravi" },
+    { rank: 3, weeklyRank: 3, weeklySeconds: 0, allTimeRank: 4, name: "Nia" },
   ]);
   assert.equal(data.racedCount, 2);
   assert.deepEqual(data.raced.map((reader) => reader.name), ["Asha", "Noor"]);
-  assert.deepEqual(data.notStarted.map((reader) => [reader.name, reader.totalSeconds, reader.rank]), [["Ravi", 0, null]]);
-  assert.equal(readerAccessibleLabel(data.notStarted[0]), "Ravi, has not started this week, 0s");
-  assert.doesNotMatch(getArenaRowClassName(data.notStarted[0]), /top-ten/);
+  assert.deepEqual(data.notStarted.map((reader) => [reader.name, reader.totalSeconds, reader.rank]), [["Ravi", 0, 3], ["Nia", 0, 3]]);
+  assert.equal(readerAccessibleLabel(data.notStarted[0]), "Rank 3, Ravi, 0s");
+  assert.match(getArenaRowClassName(data.notStarted[0]), /top-ten/);
 });
 
 test("Arena roster model handles both periods at 0, 1, 2, 3, 10, and 100 readers", () => {
@@ -117,4 +118,11 @@ test("profile sheet stays above bottom navigation and honors reduced motion", ()
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
   assert.match(component, /role="dialog"\s+aria-modal="true"/);
   assert.doesNotMatch(component, /selectedReader\.(?:email|uid|userId)/);
+});
+
+test("podium crown has scroll clearance on both tabs", () => {
+  const css = readFileSync(new URL("./ReaderArena.css", import.meta.url), "utf8");
+  const phoneRules = css.slice(css.indexOf("@media (min-width: 360px) and (max-width: 430px)"));
+  assert.match(phoneRules, /\.arena-content\s*\{[^}]*padding-top:\s*26px/);
+  assert.match(phoneRules, /\.arena-stage\s*\{[^}]*padding-top:\s*28px; overflow:\s*visible/);
 });

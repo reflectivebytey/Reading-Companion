@@ -13,7 +13,7 @@ export function formatTicketNumber(value) {
   return `RC-${String(ticketNumber).padStart(6, "0")}`;
 }
 
-export function screenshotObjectPath({ type, reporter, ticketNumber, index, count, extension }) {
+export function screenshotObjectPath({ type, reporter, ticketNumber, index, count, extension, ownerUserId }) {
   const folder = STORAGE_FOLDERS[type];
   if (!folder) throw new Error("invalid_report_type");
   if (!Number.isInteger(index) || index < 0 || index >= count || !Number.isInteger(count) || count < 1 || count > 4) {
@@ -28,5 +28,9 @@ export function screenshotObjectPath({ type, reporter, ticketNumber, index, coun
     .slice(0, 48) || "reader";
   const ticket = formatTicketNumber(ticketNumber);
   const imageSuffix = count > 1 ? `_${index + 1}` : "";
-  return `${folder}/${username}_${ticket}${imageSuffix}.${extension}`;
+  const owner = ownerUserId || "unowned";
+  if (ownerUserId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ownerUserId)) {
+    throw new Error("invalid_report_owner");
+  }
+  return `${owner}/${folder}/${username}_${ticket}${imageSuffix}.${extension}`;
 }

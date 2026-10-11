@@ -76,19 +76,19 @@ test("Reader Arena help explains ranking inputs, calculation, refresh, and data 
   assert.match(answer.content, /cannot be backfilled/i);
 });
 
-test("gem download help describes templates, ratios, effects, and saved choices", () => {
-  const answer = getRelevantHelp("How do I choose a gem card template and square post ratio?");
+test("gem download help describes the original Story card and color effects", () => {
+  const answer = getRelevantHelp("How do I choose a gem card color effect?");
 
   assert.equal(answer?.id, "gem-detail");
-  assert.match(answer.content, /14 layouts/i);
-  assert.match(answer.content, /Story.*9:16.*Post.*4:5.*Square.*1:1/);
-  assert.match(answer.content, /Surprise me/);
-  assert.match(answer.content, /saved on this device/);
+  assert.match(answer.content, /original quote card/i);
+  assert.match(answer.content, /Story format \(9:16\)/);
+  assert.match(answer.content, /Noir.*Aurora.*Sunset.*Ocean.*Forest.*Rose.*Mono.*Vintage.*Neon/);
+  assert.match(answer.content, /returns to Noir/);
 });
 
-test("in-chat animation selection explains gem templates and aspect controls", async () => {
+test("in-chat animation selection explains the original gem color effects", async () => {
   const { pickAnimationsByKeywords } = await import("./helpAnimations.js");
-  assert.equal(pickAnimationsByKeywords("How do I choose a gem card template and square aspect ratio?")[0], "gem-download");
+  assert.equal(pickAnimationsByKeywords("How do I choose a gem card color effect?")[0], "gem-download");
   assert.equal(pickAnimationsByKeywords("Where do I copy my UID on Profile?")[0], "prof-card");
 });
 

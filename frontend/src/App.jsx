@@ -100,6 +100,9 @@ import { describeLiveStatus, friendlyErrorMessage } from "./friendlyErrors.js";
 import { GeminiLiveClient } from "./geminiLiveClient.js";
 import { createOpeningMicFallback, SessionMicGate } from "./sessionMicGate.js";
 import { SessionAudioMute } from "./sessionAudioMute.js";
+import { runSessionCleanup } from "./sessionCleanup.js";
+import { requestTextAnswer } from "./sessionTextQuestion.js";
+import { buildAuthorProfiles, fetchWikipediaAuthor, NO_BIO, normalizeAuthorName } from "./authorProfiles.js";
 import { sessionStatusView } from "./sessionStatus.js";
 import { summarizeLatencies } from "./sessionLatency.js";
 import { buildPageStatusNote, createPageContextProvider, loadPage, pageCanBeSentToLive, savePage } from "./sessionPage.js";
@@ -458,7 +461,7 @@ function shrinkDataUrl(dataUrl, max = 320) {
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error) { console.error("[APP] screen crashed", error); }
+  componentDidCatch(error, info) { console.error("[APP] screen crashed", error, info?.componentStack); }
   render() {
     if (this.state.error) {
       return (
@@ -466,9 +469,8 @@ class ErrorBoundary extends Component {
           <div className="aurora-bg" />
           <h2>Yeh screen khul nahi paayi</h2>
           <p className="crash-message">App mein chhoti si gadbad ho gayi. Aapka saved data safe hai. Home par jaakar dobara try kijiye.</p>
-          <button className="primary-button" onClick={() => { this.setState({ error: null }); this.props.onReset?.(); }}>
-            Go home
-          </button>
+          <button className="primary-button" onClick={() => { this.setState({ error: null }); this.props.onRetry?.(); }}>Try again</button>
+          <button className="icon-button ghost" onClick={() => { this.setState({ error: null }); this.props.onReset?.(); }}>Go home</button>
         </div>
       );
     }
@@ -606,12 +608,21 @@ function AppCore() {
   // Tapping a report-status notification opens the app on Your Reports.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("open") !== "reports") return;
-    try { sessionStorage.setItem("rc-open-reports", "1"); } catch { /* storage unavailable */ }
+    const destination = params.get("open");
+    if (destination !== "reports" && destination !== "update") return;
+    if (destination === "reports") {
+      try {
+        sessionStorage.setItem("rc-open-reports", "1");
+        const reportId = params.get("reportId");
+        if (reportId) sessionStorage.setItem("rc-open-report-id", reportId);
+      } catch { /* storage unavailable */ }
+    }
     params.delete("open");
+    params.delete("reportId");
     const query = params.toString();
     window.history.replaceState({ screen: "dashboard" }, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
-    navigateTo("report");
+    if (destination === "reports") navigateTo("report");
+    else window.dispatchEvent(new CustomEvent("app:open-update"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -807,11 +818,11 @@ function AppCore() {
   };
 
   return (
-    <ErrorBoundary key={resetKey} onReset={() => { setResetKey((k) => k + 1); navigateTo("dashboard"); }}>
+    <ErrorBoundary key={resetKey} onRetry={() => setResetKey((k) => k + 1)} onReset={() => { setResetKey((k) => k + 1); navigateTo("dashboard"); }}>
       {screen === "session" ? (
         <SessionScreen
           bookId={activeBookId}
-          onEnd={async () => { await flushReadingUsage(); nav.goBack(); }}
+          onEnd={async () => { try { await flushReadingUsage(); } finally { nav.goBack(); } }}
           onRestart={() => restartReadingSession(activeBookId)}
           onUsageSecond={recordActiveReadingSeconds}
           onDailyLimit={handleDailyLimit}
@@ -1792,55 +1803,106 @@ function LibraryScreen({ nav }) {
   }
   function openAuthorModal(book) {
     setPortraitSearching(false); setPortraitError(false);
+    const profiles = buildAuthorProfiles(book);
     setAuthorEditor({
       bookId: book.id,
-      authorName: book.authorName || "",
-      authorBio: book.authorBio || "",
-      authorPortrait: book.authorPortrait || "",
-      authorPortraits: book.authorPortraits || [],
+      profiles,
+      activeIndex: 0,
       mode: book.authorName ? "view" : "edit",
     });
+    profiles.filter((profile) => !profile.lookupDone && !profile.unsupported).forEach((profile) => {
+      void lookupAuthorProfile(book.id, profile);
+    });
+  }
+  function saveAuthorProfiles(bookId, profiles) {
+    const authors = profiles.filter((profile) => !profile.unsupported);
+    const authorName = authors.map((profile) => profile.name.trim()).filter(Boolean).join(" and ") || profiles[0]?.name || "";
+    const authorBio = authors.map((profile) => profile.bio).filter((bio) => bio && bio !== NO_BIO).join("\n\n");
+    library.updateBookMeta(bookId, {
+      authorName,
+      authorBio,
+      authorPortrait: profiles.find((profile) => profile.dataUrl)?.dataUrl || "",
+      authorPortraits: profiles,
+    });
+    refresh();
   }
   function saveAuthorInfo() {
     if (!authorEditor) return;
-    library.updateBookMeta(authorEditor.bookId, {
-      authorName: authorEditor.authorName,
-      authorBio: authorEditor.authorBio,
+    const { bookId, profiles } = authorEditor;
+    saveAuthorProfiles(bookId, profiles);
+    setAuthorEditor((current) => current ? { ...current, mode: "view" } : current);
+    profiles.filter((profile) => !profile.lookupDone && !profile.unsupported).forEach((profile) => {
+      void lookupAuthorProfile(bookId, profile);
     });
-    setAuthorEditor(null);
-    refresh();
   }
-  async function findAuthorPortrait(isAutoRetry = false) {
-    if (!authorEditor?.authorName) return;
+  function updateAuthorProfile(index, changes) {
+    setAuthorEditor((current) => current ? {
+      ...current,
+      profiles: current.profiles.map((profile, profileIndex) => profileIndex === index ? { ...profile, ...changes } : profile),
+    } : current);
+  }
+  async function lookupAuthorProfile(bookId, initialProfile) {
+    const currentBook = library.getBook(bookId);
+    const savedProfiles = buildAuthorProfiles(currentBook || {});
+    const profile = savedProfiles.find((entry) => normalizeAuthorName(entry.name) === normalizeAuthorName(initialProfile.name)) || initialProfile;
+    if (profile.lookupDone || profile.unsupported) return;
+    const cached = { ...profile, lookupDone: true };
+    const marked = savedProfiles.map((entry) => normalizeAuthorName(entry.name) === normalizeAuthorName(profile.name) ? cached : entry);
+    saveAuthorProfiles(bookId, marked);
     setPortraitSearching(true);
-    if (!isAutoRetry) setPortraitError(false);
+    let nextProfile = cached;
     try {
-      const res = await fetch(apiUrl("/api/author-portrait"), {
+      if (!profile.dataUrl) {
+        const response = await fetch(apiUrl("/api/author-portrait"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ authorName: profile.name, bookTitle: currentBook?.title || "" }),
+        });
+        const data = await response.json();
+        const match = (data.portraits || []).find((portrait) => normalizeAuthorName(portrait.name) === normalizeAuthorName(profile.name)) || data.portraits?.[0];
+        if (match?.dataUrl) nextProfile = { ...nextProfile, dataUrl: await shrinkDataUrl(match.dataUrl), sourceUrl: match.sourceUrl || null };
+      }
+      if (!profile.bio || profile.bio === NO_BIO) {
+        const wiki = await fetchWikipediaAuthor(profile.name);
+        nextProfile = wiki
+          ? { ...nextProfile, bio: wiki.bio, bioSource: "Wikipedia", bioSourceUrl: wiki.sourceUrl, dataUrl: nextProfile.dataUrl || wiki.thumbnail }
+          : { ...nextProfile, bio: NO_BIO };
+      }
+    } catch {
+      if (!profile.bio || profile.bio === NO_BIO) nextProfile = { ...nextProfile, bio: NO_BIO };
+    } finally {
+      const latestBook = library.getBook(bookId);
+      const latestProfiles = buildAuthorProfiles(latestBook || {});
+      const updatedProfiles = latestProfiles.map((entry) => normalizeAuthorName(entry.name) === normalizeAuthorName(profile.name) ? nextProfile : entry);
+      saveAuthorProfiles(bookId, updatedProfiles);
+      setAuthorEditor((current) => current?.bookId === bookId ? {
+        ...current,
+        profiles: current.profiles.map((entry) => normalizeAuthorName(entry.name) === normalizeAuthorName(profile.name) ? nextProfile : entry),
+      } : current);
+      setPortraitSearching(false);
+    }
+  }
+  async function findAuthorPortrait() {
+    if (!authorEditor) return;
+    const profile = authorEditor.profiles[authorEditor.activeIndex];
+    if (!profile || profile.unsupported) return;
+    setPortraitSearching(true);
+    setPortraitError(false);
+    try {
+      const response = await fetch(apiUrl("/api/author-portrait"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authorName: authorEditor.authorName, bookTitle: library.getBook(authorEditor.bookId)?.title || "", tried: authorEditor.tried || [] }),
+        body: JSON.stringify({ authorName: profile.name, bookTitle: library.getBook(authorEditor.bookId)?.title || "" }),
       });
-      const data = await res.json();
-      const fallbackPortraits = data?.dataUrl ? [{ name: authorEditor.authorName, dataUrl: data.dataUrl, sourceUrl: data.sourceUrl || null }] : [];
-      const list = await Promise.all((data.portraits || fallbackPortraits).map(async (p) => ({ name: p.name || authorEditor.authorName, dataUrl: p.dataUrl ? await shrinkDataUrl(p.dataUrl) : null, sourceUrl: p.sourceUrl || null })));
-      const firstUrl = list.find((p) => p.dataUrl)?.dataUrl || "";
-      if (firstUrl) {
-        library.updateBookMeta(authorEditor.bookId, { authorPortrait: firstUrl, authorPortraits: list });
-        const newTried = (data.portraits || fallbackPortraits).map((p) => p.sourceUrl).filter(Boolean);
-        setAuthorEditor((prev) => ({ ...prev, authorPortrait: firstUrl, authorPortraits: list, tried: [...(prev.tried || []), ...newTried] }));
-        refresh();
-        return;
-      }
-      if (res.status === 503 && !isAutoRetry) {
-        // sources were rate-limited, not empty - quietly try once more
-        setTimeout(() => findAuthorPortrait(true), 6000);
-        return;
-      }
-      throw new Error(data?.error || "not_found");
+      const data = await response.json();
+      const match = (data.portraits || []).find((portrait) => normalizeAuthorName(portrait.name) === normalizeAuthorName(profile.name)) || data.portraits?.[0];
+      if (!match?.dataUrl) throw new Error(data?.error || "not_found");
+      const nextProfile = { ...profile, dataUrl: await shrinkDataUrl(match.dataUrl), sourceUrl: match.sourceUrl || null, lookupDone: true };
+      const nextProfiles = authorEditor.profiles.map((entry, index) => index === authorEditor.activeIndex ? nextProfile : entry);
+      saveAuthorProfiles(authorEditor.bookId, nextProfiles);
+      setAuthorEditor((current) => current ? { ...current, profiles: nextProfiles } : current);
     } catch {
       setPortraitError(true);
-      setAuthorEditor((prev) => (prev ? { ...prev, tried: [] } : prev));
-      if (!isAutoRetry) notify("Author ki photo online nahi mil payi - naam ki spelling check karke phir try karein.", "error");
     } finally {
       setPortraitSearching(false);
     }
@@ -1898,38 +1960,32 @@ function LibraryScreen({ nav }) {
           <Motion.div className="modal-card elevated author-modal" initial={{ opacity: 0, y: 18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={INTERACTION_SPRING} onClick={(e) => e.stopPropagation()}>
             {authorEditor.mode === "view" ? (
               <>
-              <div className="author-info-card">
-                  {(() => {
-                    const faces = authorEditor.authorPortraits?.length
-                      ? authorEditor.authorPortraits
-                      : [{ name: authorEditor.authorName, dataUrl: authorEditor.authorPortrait }];
-                    const hasAny = faces.some((f) => f.dataUrl);
-                    return (
-                      <>
-                        <div className={`author-faces n${faces.length}`}>
-                          {faces.map((f, i) => (
-                            <div className="author-face" key={i}>
-                              {f.dataUrl
-                                ? <img className="author-info-portrait" src={f.dataUrl} alt={f.name} />
-                                : <div className="author-info-avatar">{(f.name || "?")[0]?.toUpperCase()}</div>}
-                              {faces.length > 1 && <span className="author-face-name">{f.name}</span>}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="author-info-name">{authorEditor.authorName}</div>
-                        {authorEditor.authorBio && <div className="author-info-bio">{authorEditor.authorBio}</div>}
-                        {portraitSearching ? (
-                          <div className="portrait-generating-hint">Searching online...</div>
-                        ) : (
-                          <button className="icon-button ghost portrait-generate-btn" onClick={findAuthorPortrait}>
-                            {hasAny ? <RefreshCw size={14} /> : <Search size={14} />}{" "}
-                            {portraitError ? "No photo found - Retry" : hasAny ? "Look up again" : "Find photo online"}
-                          </button>
-                        )}
-                      </>
-                    );
-                  })()}
+                <div className="author-profile-tabs" role="tablist" aria-label="Book authors">
+                  {authorEditor.profiles.map((profile, index) => (
+                    <button key={`${profile.name}-${index}`} type="button" role="tab" aria-selected={authorEditor.activeIndex === index} onClick={() => setAuthorEditor((current) => ({ ...current, activeIndex: index }))}>{profile.name || "Author"}</button>
+                  ))}
                 </div>
+                {(() => {
+                  const profile = authorEditor.profiles[authorEditor.activeIndex] || authorEditor.profiles[0];
+                  return (
+                    <div className="author-info-card">
+                      {profile.dataUrl
+                        ? <img className="author-info-portrait" src={profile.dataUrl} alt={profile.name} />
+                        : <div className="author-info-avatar">{Array.from(profile.name || "A")[0]?.toLocaleUpperCase()}</div>}
+                      <div className="author-info-name">{profile.name || "Author"}</div>
+                      <div className="author-info-bio">{profile.bio || NO_BIO}</div>
+                      {profile.bioSource === "Wikipedia" && <small className="author-bio-source">Source: <a href={profile.bioSourceUrl} target="_blank" rel="noreferrer">Wikipedia</a></small>}
+                      {portraitSearching ? (
+                        <div className="portrait-generating-hint">Searching online...</div>
+                      ) : (
+                        <button className="icon-button ghost portrait-generate-btn" onClick={findAuthorPortrait}>
+                          {profile.dataUrl ? <RefreshCw size={14} /> : <Search size={14} />} {" "}
+                          {portraitError ? "No photo found - Retry" : profile.dataUrl ? "Look up again" : "Find photo online"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div className="modal-actions">
                   <button className="icon-button ghost" onClick={() => setAuthorEditor(null)}>Close</button>
                   <button className="primary-button" onClick={() => setAuthorEditor((prev) => ({ ...prev, mode: "edit" }))}>Edit</button>
@@ -1940,19 +1996,19 @@ function LibraryScreen({ nav }) {
                 <h2>Author details</h2>
                 <input
                   className="title-input compact"
-                  value={authorEditor.authorName}
-                  onChange={(e) => setAuthorEditor((prev) => ({ ...prev, authorName: e.target.value }))}
+                  value={authorEditor.profiles[authorEditor.activeIndex]?.name || ""}
+                  onChange={(e) => updateAuthorProfile(authorEditor.activeIndex, { name: e.target.value, bio: "", dataUrl: "", sourceUrl: null, bioSource: "", bioSourceUrl: "", lookupDone: false })}
                   placeholder="Author name"
                 />
                 <textarea
                   className="author-bio-input"
-                  value={authorEditor.authorBio}
-                  onChange={(e) => setAuthorEditor((prev) => ({ ...prev, authorBio: e.target.value }))}
-                  placeholder="Comprehensive author bio (a few sentences)"
+                  value={authorEditor.profiles[authorEditor.activeIndex]?.bio === NO_BIO ? "" : authorEditor.profiles[authorEditor.activeIndex]?.bio || ""}
+                  onChange={(e) => updateAuthorProfile(authorEditor.activeIndex, { bio: e.target.value })}
+                  placeholder="Short author bio"
                   rows={5}
                 />
                 <div className="modal-actions">
-                  <button className="icon-button ghost" onClick={() => setAuthorEditor(null)}>Cancel</button>
+                  <button className="icon-button ghost" onClick={() => openAuthorModal(library.getBook(authorEditor.bookId))}>Cancel</button>
                   <button className="primary-button" onClick={saveAuthorInfo}>Save</button>
                 </div>
               </>
@@ -2946,6 +3002,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const onUsageSecondRef = useRef(onUsageSecond);
   const onDailyLimitRef = useRef(onDailyLimit);
   const handleEndRef = useRef(null);
+  const endPromiseRef = useRef(null);
   onUsageSecondRef.current = onUsageSecond;
   onDailyLimitRef.current = onDailyLimit;
   const book = library.getBook(bookId);
@@ -2985,6 +3042,8 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const [asking, setAsking] = useState(false);
   const [handsFree, setHandsFree] = useState(false);
   const [typedQuestion, setTypedQuestion] = useState("");
+  const [typedQuestionOpen, setTypedQuestionOpen] = useState(false);
+  const [voiceRetryError, setVoiceRetryError] = useState("");
   const [pageNumberInput, setPageNumberInput] = useState("");
   const chapterPathRef = useRef(null);
   const [textBusy, setTextBusy] = useState(false);
@@ -3258,7 +3317,28 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   async function warmSessionAfterUnmute() {
-    await ensureConnected({ silent: true });
+    const client = clientRef.current;
+    if (!client) throw new Error("Voice connection is not ready yet.");
+    if (client.stopped) {
+      await client.retry();
+    } else {
+      const backoff = [500, 1500, 3000];
+      let lastError;
+      for (let attempt = 0; attempt < backoff.length; attempt += 1) {
+        try {
+          await ensureConnected({ silent: true });
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < backoff.length - 1) {
+            setStatus("Reconnecting…");
+            await new Promise((resolve) => setTimeout(resolve, backoff[attempt]));
+          }
+        }
+      }
+      if (lastError) throw lastError;
+    }
     if (!mutedRef.current) setStatus("Listening for your question");
   }
 
@@ -3303,42 +3383,9 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     }, 10_000);
   }
 
-  function startAsk() {
-    if (LEGACY_STREAMING || asking || mutedRef.current || muted || restorePrompt || snapBusy) return;
-    if (!audioCaptureRef.current?.stream) {
-      notify("Mic ready nahi hai. Permission allow karke dobara try kijiye.", "error");
-      return;
-    }
-    clearTimeout(warmTimerRef.current);
-    askingRef.current = true;
-    setAsking(true);
-    questionInFlightRef.current = true;
-    markActive();
-    audioPlaybackRef.current?.clear();
-    micGateRef.current?.start();
-    armFollowUp();
-    void ensureConnected().catch(() => {
-      askingRef.current = false;
-      clearTimeout(followTimerRef.current);
-      micGateRef.current?.reset();
-      questionInFlightRef.current = false;
-      setAsking(false);
-    });
-  }
-
-  function stopAsk() {
-    if (LEGACY_STREAMING) return;
-    endAskNow();
-    setStatus("Ready for the next question");
-  }
-
   function toggleAsk() {
     triggerLightTap();
-    if (muted) {
-      notify("Voice abhi unavailable hai. Upar ke notice se Retry connection dabaiye.", "info");
-      return;
-    }
-    if (asking) stopAsk(); else startAsk();
+    setTypedQuestionOpen((open) => !open);
   }
 
   function stopAutoListen() {
@@ -3527,7 +3574,6 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       notify(`Hands-free unavailable: ${error.message}`, "error");
     }
   }
-// eslint-disable-next-line no-unused-vars
   async function askByTyping(event) {
     event.preventDefault();
     const question = typedQuestion.trim();
@@ -3535,21 +3581,14 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     setTextBusy(true);
     markActive();
     try {
-      const response = await fetch(apiUrl("/api/reading/ask-text"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const answer = await requestTextAnswer(fetch, apiUrl("/api/reading/ask-text"), {
           question,
           context: `${buildLiveContext().slice(-12000)}\n${buildPageStatusNote(pageRef.current, ghostModeRef.current)}`,
           pageStatus: pageCanBeSentToLive(pageRef.current) ? "verified_book_page" : pageRef.current ? "unverified" : "none",
           verification: pageRef.current?.verification || null,
           transcription: pageRef.current?.verification?.text || "",
           image: pageCanBeSentToLive(pageRef.current) ? pageRef.current.base64 : "",
-        }),
       });
-      if (!response.ok) throw new Error(response.status === 429 ? "Too many questions right now. Please try later." : "Text answer unavailable. Please retry.");
-      const { answer } = await response.json();
-      if (!answer) throw new Error("No answer received. Please retry.");
       appendLine("reader", question);
       appendLine("companion", answer);
       setTypedQuestion("");
@@ -4563,6 +4602,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
         if (!nextMuted) muteStartedAtRef.current = null;
         mutedRef.current = nextMuted;
         setMuted(nextMuted);
+        if (!nextMuted) setVoiceRetryError("");
         if (nextMuted) {
           askingRef.current = false;
           questionInFlightRef.current = false;
@@ -4574,9 +4614,14 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
       },
       onStatus: (nextStatus, error) => {
         if (error) console.warn("[VOICE] muted-session warm failed", error?.message || error);
+        if (nextStatus === "reconnecting") setVoiceRetryError("");
         setStatus(nextStatus === "reconnecting" ? "Reconnecting…" : nextStatus === "muted" ? "Mic muted" : nextStatus);
       },
-      onError: (error) => notify(friendlyErrorMessage(error, "Microphone permission is needed to unmute."), "error"),
+      onError: (error) => {
+        const message = friendlyErrorMessage(error, "Voice connection could not be restored. Tap Retry or try unmuting again.");
+        setVoiceRetryError(message);
+        setStatus("Voice unavailable");
+      },
     });
     const [conn, mic] = await Promise.allSettled([
       LEGACY_STREAMING ? clientRef.current.connect() : Promise.resolve(),
@@ -4600,25 +4645,34 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
   }
 
   async function handleEnd({ restart = false } = {}) {
-    clearTimeout(warmTimerRef.current);
-    clearOpeningMicFallback();
-    micGateRef.current?.reset();
-    if (vadRef.current) {
-      await vadRef.current.destroy().catch((error) => console.warn("[VAD] cleanup failed", error));
+    if (endPromiseRef.current) return endPromiseRef.current;
+    endingRef.current = true;
+    endPromiseRef.current = (async () => {
+      await runSessionCleanup([
+        ["timers", () => { clearTimeout(warmTimerRef.current); clearOpeningMicFallback(); }],
+        ["mic gate", () => micGateRef.current?.reset()],
+      ], (label, error) => console.warn(`[SESSION] ${label} cleanup failed`, error));
+      const vad = vadRef.current;
       vadRef.current = null;
-    }
-    library.endSession(bookId);
-    audioCaptureRef.current?.stop();
-    audioPlaybackRef.current?.close();
-    stopCameraNow();
-    await clientRef.current?.close();
-    if (restart) {
-      await finalizeSessionArtifacts();
-      onRestart?.();
-    } else {
-      onEnd();
-      void finalizeSessionArtifacts();
-    }
+      await runSessionCleanup([
+        ["VAD", () => vad?.destroy?.()],
+        ["reading session", () => library.endSession(bookId)],
+        ["microphone", () => audioCaptureRef.current?.stop()],
+        ["playback", () => audioPlaybackRef.current?.close()],
+        ["camera", () => stopCameraNow()],
+        ["Live connection", () => clientRef.current?.close()],
+      ], (label, error) => console.warn(`[SESSION] ${label} cleanup failed`, error));
+      if (restart) {
+        await finalizeSessionArtifacts();
+        endPromiseRef.current = null;
+        endingRef.current = false;
+        onRestart?.();
+      } else {
+        try { await onEnd?.(); } catch (error) { console.error("[SESSION] end navigation failed", error); }
+        finally { void finalizeSessionArtifacts(); }
+      }
+    })();
+    return endPromiseRef.current;
   }
   handleEndRef.current = handleEnd;
 
@@ -4674,14 +4728,14 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
       </div>
 
       <AnimatePresence>
-        {liveNotice && (
-          <Motion.div key={liveNotice.code} className="hud-notice" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.97 }} transition={INTERACTION_SPRING}>
+        {(liveNotice || voiceRetryError) && (
+          <Motion.div key={voiceRetryError ? "voice-retry" : liveNotice.code} className="hud-notice" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.97 }} transition={INTERACTION_SPRING}>
             <ServiceNotice
               compact
-              kind={liveNotice.kind}
-              title={liveNotice.title}
-              detail={liveNotice.detail}
-              actions={liveNotice.code === "lost" ? [{ label: "End session", onClick: handleEnd, primary: true }] : []}
+              kind={voiceRetryError ? "error" : liveNotice.kind}
+              title={voiceRetryError ? "Voice connection unavailable" : liveNotice.title}
+              detail={voiceRetryError || liveNotice.detail}
+              actions={voiceRetryError ? [{ label: "Retry", onClick: toggleMute, primary: true }] : liveNotice.code === "lost" ? [{ label: "End session", onClick: handleEnd, primary: true }] : []}
             />
           </Motion.div>
         )}
@@ -4740,6 +4794,22 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           </div>
         </div>
       )}
+      {!LEGACY_STREAMING && typedQuestionOpen && (
+        <form className="session-ask" onSubmit={askByTyping} aria-label="Type a question">
+          <div className="session-text-fallback">
+            <input
+              autoFocus
+              type="text"
+              value={typedQuestion}
+              onChange={(event) => setTypedQuestion(event.target.value)}
+              placeholder="Type a question"
+              aria-label="Type a question"
+              disabled={textBusy}
+            />
+            <button type="submit" disabled={textBusy || !typedQuestion.trim()}>{textBusy ? "Sending…" : "Send"}</button>
+          </div>
+        </form>
+      )}
       <input ref={snapFileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { handleSnapshotFile(e.target.files?.[0]); e.target.value = ""; }} />
 
       <div className="glass-dock">
@@ -4749,7 +4819,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           </Motion.button>
         ) : (
           <>
-            <Motion.button className={`hud-btn ${asking ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleAsk} aria-label={asking ? "Stop asking" : "Ask a question"} title={asking ? "Stop asking" : "Ask a question"}><MessageCircleMore size={22} /></Motion.button>
+            <Motion.button className={`hud-btn ${typedQuestionOpen ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleAsk} aria-label={typedQuestionOpen ? "Close typed question" : "Type a question"} title={typedQuestionOpen ? "Close typed question" : "Type a question"}><MessageSquareText size={22} /></Motion.button>
             <Motion.button className={`hud-btn mic-mute-btn ${muted ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleMute} aria-pressed={muted} aria-label={muted ? "Unmute microphone" : "Mute microphone"} title={muted ? "Unmute microphone" : "Mute microphone"}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</Motion.button>
           </>
         )}

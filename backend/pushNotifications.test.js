@@ -55,6 +55,46 @@ test("buildPushPayload trims fields and only allows in-app urls", () => {
   assert.equal(JSON.parse(buildPushPayload({ title: "Hi", url: "/?release=2.1.0" })).url, "/?release=2.1.0");
 });
 
+test("rich notification payload keeps legacy fields and adds safe typed actions and deep links", () => {
+  const payload = JSON.parse(buildPushPayload({
+    type: "report_status",
+    title: "Report #000012 is now In progress",
+    body: "We have started reviewing your report.",
+    tag: "report-r-12",
+    data: { url: "/?open=reports&reportId=r-12" },
+    actions: [{ action: "view-report", title: "View report", url: "/?open=reports&reportId=r-12" }],
+    image: "https://cdn.example/report.png",
+  }));
+  assert.equal(payload.type, "report_status");
+  assert.equal(payload.url, "/?open=reports&reportId=r-12");
+  assert.equal(payload.data.url, payload.url);
+  assert.deepEqual(payload.actions, [{ action: "view-report", title: "View report", url: payload.url }]);
+  assert.equal(payload.image, "https://cdn.example/report.png");
+  assert.equal(payload.tag, "report-r-12");
+});
+
+test("notification text, actions, and total payload remain bounded", () => {
+  const payloadText = buildPushPayload({
+    title: "T".repeat(80),
+    body: "B".repeat(240),
+    type: "app_update",
+    image: `/${"x".repeat(400)}`,
+    actions: Array.from({ length: 8 }, (_, index) => ({ action: `action-${index}`, title: `Action ${index}` })),
+    tag: "release",
+  });
+  const payload = JSON.parse(payloadText);
+  assert.equal(payload.title.length, 50);
+  assert.equal(payload.body.length, 120);
+  assert.equal(payload.actions.length, 2);
+  assert.ok(Buffer.byteLength(payloadText) < 3072);
+});
+
+test("only developer announcements can use external deep links", () => {
+  assert.equal(JSON.parse(buildPushPayload({ title: "Update", data: { url: "https://outside.example" } })).url, "/");
+  const announcement = JSON.parse(buildPushPayload({ type: "announcement", title: "Hello", data: { url: "https://example.org/news" } }));
+  assert.equal(announcement.data.url, "https://example.org/news");
+});
+
 test("broadcast removes expired subscriptions and reports totals", async () => {
   const calls = [];
   const rows = [

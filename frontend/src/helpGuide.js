@@ -113,7 +113,7 @@ const BASE_HELP_GUIDE = [
     title: "Author details and photo",
     keywords: ["author", "writer", "author details", "author bio", "author photo", "find photo online", "look up again", "edit author"],
     screen: "library",
-    content: "Tap **Author** on a book tile to see the author sheet. In view mode you can see the author name, bio and any saved portrait, then use **Find photo online** or **Look up again**. **Edit** switches to fields for the author name and bio, with **Save** and **Cancel**. The companion can also set the book’s author by voice during reading.",
+    content: "Tap **Author** on a book tile to see one profile for each author. Swipe the author tabs to switch profiles; each shows a round portrait or initials, a short bio and its source when available. Use **Find photo online** for a portrait, or **Edit** to update that author’s name and bio. If no bio is found, tap **Edit** to add one. The companion can also set a book’s author by voice during reading.",
   },
   {
     id: "chapters",
@@ -262,9 +262,9 @@ const BASE_HELP_GUIDE = [
   {
     id: "gem-detail",
     title: "Gem detail, illustrations and downloads",
-    keywords: ["gem detail", "illustration", "generate illustration", "regenerate", "retry", "real-life application", "download gem", "share gem", "gem card template", "quote card style", "card aspect ratio", "surprise me", "editorial paper", "polaroid card", "cosmic card"],
+    keywords: ["gem detail", "illustration", "generate illustration", "regenerate", "retry", "real-life application", "download gem", "share gem", "gem card color effect", "quote card style", "noir", "aurora", "sunset", "ocean", "forest", "rose", "mono", "vintage", "neon"],
     screen: "gems",
-    content: "A gem detail page shows the quote, book, author and chapter. **Generate illustration** lets you choose styles such as **Lo-fi Ghibli**, **Charcoal Sketch**, **Cinematic Silhouette** and **White Ink Sketch**. **Regenerate** or **Retry** appear when needed. The detail page also shows the **Real-life application**. Use **Download** or **Share** to open the quote-card studio. Pick one of 14 layouts in the horizontal template strip, previewed with your quote; choose **Story** (9:16), **Post** (4:5) or **Square** (1:1), and select a color effect to set its accent. **Surprise me** picks a template and effect. Your last template, effect and ratio are saved on this device. Export creates a 1080-pixel-wide PNG; photo layouts use a generated-color fallback if an image is missing or unavailable.",
+    content: "A gem detail page shows the quote, book, author and chapter. **Generate illustration** lets you choose styles such as **Lo-fi Ghibli**, **Charcoal Sketch**, **Cinematic Silhouette** and **White Ink Sketch**. **Regenerate** or **Retry** appear when needed. The detail page also shows the **Real-life application**. Use **Download** or **Share** to open the original quote card in fixed Story format (9:16), exported as a 1080 × 1920 PNG. Choose a color effect from **Noir**, **Aurora**, **Sunset**, **Ocean**, **Forest**, **Rose**, **Mono**, **Vintage** or **Neon**. The effect returns to Noir when the card is opened again; saved gems and quotes are unchanged.",
   },
   {
     id: "memory",

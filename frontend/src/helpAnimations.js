@@ -51,7 +51,7 @@ const CORE_HELP_ANIMATIONS = [
 
   // Gems
   { id: "gem-card", group: "Gems", title: "Gems card", kind: "grid", accent: "#ff8fab",
-    keywords: ["gems card", "gem card", "gems", "saved quotes", "quotes", "save a quote", "gem tab", "save this line"],
+    keywords: ["gems card", "gems", "saved quotes", "quotes", "save a quote", "gem tab", "save this line"],
     items: [item("MessageSquareText", "The quote", "Your saved line, with its book and chapter."), item("Search", "Find", "Search quotes or filter with book chips."), item("Gem", "Open", "Tap a gem to see it in full."), item("Trash2", "Delete", "The bin removes a gem.")] },
   { id: "gem-image", group: "Gems", title: "Image generation", kind: "flow", accent: "#b48cff",
     keywords: ["image generation", "generate image", "illustration", "gem image", "picture for gem", "ai image", "artwork"],
@@ -59,9 +59,9 @@ const CORE_HELP_ANIMATIONS = [
   { id: "gem-apply", group: "Gems", title: "Real-life application", kind: "flow", accent: "#42d897",
     keywords: ["real life application", "real-life application", "apply", "how to apply", "application suggestion", "use in real life"],
     items: [item("Gem", "A quote", "Inside each gem you can reveal an application."), item("Brain", "Think", "The AI connects the idea to daily life."), item("Check", "Try it", "You get a small practical action.")] },
-  { id: "gem-download", group: "Gems", title: "Gem card studio", kind: "flow", accent: "#6aa9ff",
-    keywords: ["download", "download gem", "share card", "export gem", "shareable card", "save as image", "gem card template", "quote card style", "aspect ratio", "story post square", "surprise me"],
-    items: [item("Gem", "Choose a template", "Preview 14 layouts with your saved quote; Summit keeps the original photo style."), item("Square", "Set the shape", "Choose Story 9:16, Post 4:5 or Square 1:1."), item("Palette", "Pick an accent", "The existing color effects drive each template's accent; Neon Terminal keeps its fixed palette."), item("Download", "Export or share", "Fonts load before the 1080px-wide PNG is downloaded or shared.")] },
+  { id: "gem-download", group: "Gems", title: "Gem card color effects", kind: "flow", accent: "#6aa9ff",
+    keywords: ["download", "download gem", "share card", "export gem", "shareable card", "save as image", "gem card color effect", "quote card style", "noir", "aurora", "sunset", "ocean", "forest", "rose", "mono", "vintage", "neon"],
+    items: [item("Gem", "Open your saved gem", "Use Download or Share to open its original quote card."), item("Palette", "Choose a color effect", "Pick Noir, Aurora, Sunset, Ocean, Forest, Rose, Mono, Vintage or Neon."), item("Download", "Save or share", "The fixed Story card exports as a 1080 × 1920 PNG.")] },
 
   // Memory
   { id: "mem-prefs", group: "Memory", title: "Memory preferences", kind: "toggles", accent: "#f2a65a",

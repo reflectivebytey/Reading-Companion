@@ -56,7 +56,7 @@ test("ranking response validates rows and marks the signed-in reader", () => {
   assert.throws(() => readerRankingResponse(null, "abc"), /invalid_reader_rankings/);
 });
 
-test("weekly Arena includes every all-time participant and orders zero readers by all-time rank", () => {
+test("weekly Arena includes every all-time participant and preserves the zero-time tie rank", () => {
   const allTime = [
     { user_id: "user-a", reader_name: "Asha", rank_position: 1, total_reading_seconds: 600, arena_show_photo: false },
     { user_id: "user-b", reader_name: "Ravi", rank_position: 2, total_reading_seconds: 300, arena_show_photo: false },
@@ -76,6 +76,20 @@ test("weekly Arena includes every all-time participant and orders zero readers b
   assert.equal(publicRows[2].allTimeRank, 2);
   assert.equal(publicRows[1].allTimeSeconds, 600);
   assert.equal(publicRows.some((row) => JSON.stringify(row).includes("user-")), false);
+});
+
+test("registered readers with no reading time remain public-safe ranked entries", () => {
+  const allTime = [
+    { user_id: "active", reader_name: "Asha", rank_position: 1, total_reading_seconds: 60, arena_show_photo: false },
+    { user_id: "new-reader", reader_name: "", rank_position: 2, total_reading_seconds: 0, arena_show_photo: false },
+  ];
+  const sets = buildArenaRankingSets(allTime, [
+    { user_id: "active", reader_name: "Asha", rank_position: 1, total_reading_seconds: 60, arena_show_photo: false },
+    { user_id: "new-reader", reader_name: "", rank_position: 2, total_reading_seconds: 0, arena_show_photo: false },
+  ]);
+  const rows = readerRankingResponse(sets.allTime, "new-reader");
+  assert.deepEqual(rows.map((row) => [row.name, row.rank, row.totalSeconds]), [["Asha", 1, 60], ["Reader", 2, 0]]);
+  assert.equal(JSON.stringify(rows).includes("new-reader"), false);
 });
 
 test("reader rankings preserve tied rank positions", () => {

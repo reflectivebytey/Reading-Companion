@@ -76,6 +76,23 @@ export default function UpdateManager({ paused = false, onUpdateState, actionsRe
   }, [updateReady, incoming, onUpdateState]);
 
   useEffect(() => {
+    const openUpdate = async () => {
+      try {
+        const registration = await navigator.serviceWorker?.getRegistration?.();
+        if (!registration) return;
+        if (registration.waiting) {
+          await updateServiceWorker(true);
+          return;
+        }
+        await registration.update();
+        if (registration.waiting) await updateServiceWorker(true);
+      } catch { /* the regular update check will retry when the app is visible */ }
+    };
+    window.addEventListener("app:open-update", openUpdate);
+    return () => window.removeEventListener("app:open-update", openUpdate);
+  }, [updateServiceWorker]);
+
+  useEffect(() => {
     if (!actionsRef) return undefined;
     const actions = {
       async checkForUpdates() {

@@ -61,6 +61,8 @@ export class GeminiLiveClient {
     this.retryTimer = null;
     this.retryResolve = null;
     this.terminalNoticeSent = false;
+    this.retryResolve = null;
+    this.retryReject = null;
     this.pageHideListener = () => releaseLiveLease(this.leaseId, { beacon: true });
     if (typeof window !== "undefined") window.addEventListener("pagehide", this.pageHideListener);
   }
@@ -172,6 +174,9 @@ export class GeminiLiveClient {
     this.ready = true;
     this.contextReady = false;
     this.connectionId += 1;
+    this.retryResolve?.();
+    this.retryResolve = null;
+    this.retryReject = null;
     const connectionId = this.connectionId;
     this.connectionRetries = 0;
     this.lastReconnectAt = 0;
@@ -321,17 +326,25 @@ export class GeminiLiveClient {
     this.gen += 1;
     try { this.session?.close(); } catch { /* already closed */ }
     this.session = null;
+    this.retryReject?.(new Error("Voice reconnection failed."));
+    this.retryResolve = null;
+    this.retryReject = null;
     this.handlers.onStatus?.("voice connection unavailable", true);
     this.handlers.onNotice?.(userNoticeForFailure(kind));
   }
 
   retry() {
-    if (!this.stopped) return;
+    if (!this.stopped) return Promise.resolve();
     this.stopped = false;
     this.terminalNoticeSent = false;
     this.connectionRetries = 0;
     this.lastReconnectAt = 0;
+    const ready = new Promise((resolve, reject) => {
+      this.retryResolve = resolve;
+      this.retryReject = reject;
+    });
     void this._handleTransportError({ message: "manual retry", soft: true });
+    return ready;
   }
 
   _watch() {
